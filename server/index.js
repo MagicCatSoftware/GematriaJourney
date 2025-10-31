@@ -1,3 +1,4 @@
+
 // server/index.js
 import 'dotenv/config';
 import express from 'express';
@@ -11,12 +12,17 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 
+import { authRequired } from './middleware/auth.js';
+import { requirePaid } from './middleware/roles.js';
+
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as FacebookStrategy } from 'passport-facebook';
 
 import User from './models/User.js';
 import Gematria from './models/Gematria.js';
 import Entry from './models/Entry.js';
+
+import adminRouter from './routes/admin.js';
 
 import Stripe from 'stripe';
 import {
@@ -141,7 +147,7 @@ passport.deserializeUser(async (id, done) => {
     done(e);
   }
 });
-
+app.use('/admin', adminRouter);
 // ---------- OAuth Strategies ----------
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID || '',
@@ -220,7 +226,7 @@ app.get('/api/me', (req, res) => {
 app.get('/api/me/full', ensureAuth, async (req, res) => {
   try {
     const u = await User.findById(req.user._id)
-      .select('_id name email photoUrl createdAt bio')
+      .select('_id role name email photoUrl createdAt bio')
       .lean();
     res.json(u);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -312,6 +318,35 @@ app.post('/api/entries', ensureAuth, async (req,res) => {
       return res.json({ ok: true, id: e._id });
     }
   } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/entries', ensureAuth,  async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 200, 1000);
+    const skip  = Math.max(Number(req.query.skip) || 0, 0);
+    const q     = (req.query.q || '').trim();
+
+    const findQuery = q
+      ? { $or: [
+          { title: { $regex: q, $options: 'i' } },
+          { text: { $regex: q, $options: 'i' } },
+          { visibility: { $regex: q, $options: 'i' } },
+        ]}
+      : {};
+
+    const entries = await Entry.find(findQuery)
+      .populate('owner', 'name email')
+      .populate('gematria')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    res.json({ entries });
+  } catch (e) {
+    console.error('Error fetching entries:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Your entries (decrypt private)
@@ -503,6 +538,12 @@ app.post('/api/create-checkout-session', ensureAuth, async (req, res) => {
     });
     res.json({ url: sessionObj.url });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/auth/logout', (req, res) => {
+  res.clearCookie('token');
+  req.session?.destroy?.(() => {});
+  res.json({ ok: true });
 });
 
 // ---------- Start ----------

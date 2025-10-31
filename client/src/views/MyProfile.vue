@@ -99,18 +99,128 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.card { background:#fff; border:1px solid #eee; border-radius:.8rem; padding:1rem; }
-.row { display:flex; gap:1rem; align-items:flex-start; }
+/* --- CARD / PANEL --- */
+.card {
+  position: relative;
+  background: #0b0b0b;               /* deep charcoal to match site */
+  border: 1px solid #1f1f1f;
+  border-radius: 14px;
+  padding: 1rem;
+  color: var(--fg);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.02) inset,
+    0 6px 20px rgba(0,0,0,0.35);
+}
+.card::after {                        /* faint chalk speckle */
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .05;
+  background:
+    radial-gradient(1px 1px at 20% 35%, #fff 20%, transparent 21%),
+    radial-gradient(1px 1px at 75% 65%, #fff 18%, transparent 19%),
+    radial-gradient(1px 1px at 45% 80%, #fff 14%, transparent 15%);
+  mix-blend-mode: screen;
+  border-radius: 14px;
+}
+
+/* --- LAYOUT --- */
+.row { display:flex; gap:1.1rem; align-items:flex-start; }
 @media (max-width: 800px) { .row { flex-direction: column; } }
-.photo { display:flex; flex-direction:column; gap:.5rem; align-items:center; }
-.avatar { width:120px; height:120px; border-radius:50%; object-fit:cover; border:1px solid #eee; }
+
+/* --- PHOTO BLOCK --- */
+.photo { display:flex; flex-direction:column; gap:.6rem; align-items:center; }
+
+.avatar {
+  width:120px; height:120px; border-radius:50%; object-fit:cover;
+  border: 1px dashed rgba(255,255,255,.35);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,.10) inset,
+    0 1px 0 rgba(255,255,255,.06);
+  background:#0f0f0f;
+}
+
+/* Style the native file input to fit the theme */
+.photo input[type="file"] {
+  font-size:.9rem;
+  color: var(--fg);
+  background:#101010;
+  border:1px solid #2a2a2a;
+  border-radius:.55rem;
+  padding:.45rem .6rem;
+  width: 100%;
+}
+.photo input[type="file"]::file-selector-button {
+  margin-right:.6rem;
+  padding:.4rem .7rem;
+  border: 2px dashed rgba(255,255,255,.65);
+  border-radius:.5rem;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.photo input[type="file"]:focus-visible {
+  outline: 2px solid rgba(255,255,255,.9);
+  outline-offset: 2px;
+  border-radius:.5rem;
+}
+
+/* --- FIELDS --- */
 .fields { flex:1; }
-.field { margin-bottom:.75rem; }
-.input { width:100%; padding:.55rem .7rem; border:1px solid #ddd; border-radius:.5rem; }
-.btn { padding:.5rem .9rem; border-radius:.6rem; background:#111; color:#fff; }
-.btn.small { padding:.35rem .6rem; font-size:.9rem; }
-.muted { color:#777; }
-.small { font-size:.88rem; }
-.error { color:#b00020; margin-top:.5rem; }
-.ok { color:#0a7a28; margin-top:.5rem; }
+.field { margin-bottom:.9rem; }
+label { display:block; margin-bottom:.35rem; color: var(--fg); opacity:.95; }
+
+.input, textarea.input {
+  width:100%;
+  padding:.6rem .75rem;
+  background:#101010;
+  border:1px solid #2a2a2a;
+  border-radius:.6rem;
+  color:var(--fg);
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.input::placeholder { color: var(--muted); }
+.input:focus,
+textarea.input:focus {
+  outline:none;
+  border-color:#555;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.06);
+  background:#111;
+}
+
+/* --- BUTTONS --- */
+.btn {
+  padding:.55rem .95rem; border-radius:.7rem;
+  background: transparent; color: var(--fg);
+  outline: 2px dashed rgba(255,255,255,.7);
+  outline-offset: -4px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.12) inset;
+  transition: background .15s ease, transform .15s ease, opacity .15s ease;
+}
+.btn:hover { background: rgba(255,255,255,.06); transform: translateY(-1px); }
+.btn.small { padding:.38rem .65rem; font-size:.9rem; border-radius:.55rem; }
+
+.btn:disabled,
+[disabled].btn { opacity:.55; cursor:not-allowed; transform:none; }
+
+/* --- STATUS TEXT --- */
+.muted { color: var(--muted); }
+.small { font-size:.9rem; }
+.error { color:#ff6b8b; margin-top:.55rem; }
+.ok    { color:#69f0a8; margin-top:.55rem; }
+
+/* --- ACCESSIBILITY --- */
+.input:focus-visible,
+.btn:focus-visible {
+  outline: 2px solid rgba(255,255,255,.95);
+  outline-offset: 2px;
+  border-radius:.5rem;
+}
+
+/* --- REDUCED MOTION --- */
+@media (prefers-reduced-motion: reduce) {
+  .btn, .input { transition: none; }
+}
 </style>
+

@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite --host --port 5173",
+    "dev": "npx vite --host --port 5173",
     "build": "vite build",
     "preview": "vite preview --host --port 5173"
   },
@@ -13,7 +13,7 @@
     "vue-router": "^4.6.3"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.1.2",
-    "vite": "^5.4.0"
+    "@vitejs/plugin-vue": "^5.2.4",
+    "vite": "^5.4.21"
   }
 }

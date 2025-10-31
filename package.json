@@ -2,10 +2,10 @@
   "name": "gematriajourney",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node server/index.js"
   },
+  "type": "module",
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -15,7 +15,7 @@
     "cookie-session": "^2.1.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
-    "express": "^5.1.0",
+    "express": "^4.21.1",
     "express-session": "^1.18.2",
     "mongoose": "^8.19.2",
     "multer": "^2.0.2",
