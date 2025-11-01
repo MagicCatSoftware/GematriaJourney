@@ -1,17 +1,21 @@
-export function requireRole(role = 'admin') {
-  return (req, res, next) => {
-    const me = req.user;
-    if (!me) return res.status(401).json({ error: 'Auth required' });
-    if (me.role !== role) return res.status(403).json({ error: 'Admin only' });
-    next();
-  };
+// server/middleware/roles.js
+export function requireAuthOnly(req, res, next) {
+  if (req.isAuthenticated && req.isAuthenticated()) return next();
+  return res.status(401).json({ error: 'unauthenticated' });
 }
 
-export function requirePaid(req, res, next) {
-  const me = req.user;
-  if (!me) return res.status(401).json({ error: 'Auth required' });
-  // Support either boolean "isPaid" or your existing "isLifetime"
-  const ok = me.isPaid || me.isLifetime;
-  if (!ok) return res.status(402).json({ error: 'Payment required' }); // 402 semantically fits
-  next();
+export function requireAdmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'unauthenticated' });
+  if (req.user.role === 'admin') return next();
+  return res.status(403).json({ error: 'forbidden', message: 'Admin required' });
+}
+
+export function requirePaidOrAdmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'unauthenticated' });
+  if (req.user.role === 'admin') return next();
+  if (req.user.isLifetime) return next();
+  return res.status(403).json({
+    error: 'payment_required',
+    message: 'Lifetime membership required to access this feature.'
+  });
 }

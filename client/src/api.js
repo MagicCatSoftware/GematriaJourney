@@ -1,66 +1,62 @@
 // client/src/api.js
-const BASE = import.meta.env.VITE_SERVER_URL || ''; // e.g. '' (same origin) or 'https://set-dec.com'
 
-// ---------- Low-level helpers ----------
-function buildUrl(path, params) {
-  const qs = params ? new URLSearchParams(params).toString() : '';
-  return qs ? `${BASE}${path}?${qs}` : `${BASE}${path}`;
+// ---------- Base URL ----------
+const BASE =
+  (import.meta?.env?.VITE_SERVER_URL && import.meta.env.VITE_SERVER_URL.trim()) ||
+  (typeof window !== 'undefined' ? window.location.origin : '');
+
+// ---------- Small utils ----------
+const isJSON = (ct) => (ct || '').includes('application/json');
+const toQS = (params) => (params ? `?${new URLSearchParams(params).toString()}` : '');
+const withTimeout = (ms, signal) => {
+  if (!ms) return undefined;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(new DOMException('Timeout', 'TimeoutError')), ms);
+  if (signal) signal.addEventListener('abort', () => clearTimeout(t), { once: true });
+  return ctrl.signal;
+};
+
+// ---------- 401 handler (single place) ----------
+function handleUnauthorized(to) {
+  const next = encodeURIComponent(to || (typeof window !== 'undefined'
+    ? window.location.pathname + window.location.search
+    : '/'));
+  const target = `/login?next=${next}`;
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    window.location.assign(target);
+  }
 }
 
-// Your original "request" helper (returns parsed data directly)
-async function request(path, opts = {}) {
-  const isFormData = opts.body instanceof FormData;
-  const headers =
-    isFormData
-      ? (opts.headers || {}) // let browser set multipart boundary
-      : { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+// ---------- Core fetch wrappers ----------
+async function coreFetch(path, { method = 'GET', params, body, headers, timeoutMs, rawBody } = {}) {
+  const url = BASE + path + toQS(params);
+  const isFormData = body instanceof FormData;
 
-  const res = await fetch(BASE + path, {
+  const init = {
+    method,
     credentials: 'include',
-    headers,
-    ...opts,
-  });
+    headers: isFormData
+      ? headers || {}
+      : {
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+          ...(headers || {}),
+        },
+    body: isFormData ? body : body ? JSON.stringify(body) : rawBody ?? undefined,
+    signal: withTimeout(timeoutMs),
+  };
 
-  if (res.status === 204) return null;
-  const ct = res.headers.get('content-type') || '';
-  const data = ct.includes('application/json') ? await res.json().catch(() => ({})) : await res.text();
+  const res = await fetch(url, init);
 
-  if (!res.ok) {
-    const message = (data && (data.error || data.message)) || `HTTP ${res.status}`;
-    const err = new Error(message);
-    err.status = res.status;
-    err.payload = data;
+  if (res.status === 401) {
+    const err = new Error('unauthenticated');
+    err.status = 401;
     throw err;
   }
-  return data;
-}
 
-// Your original "json" helper (returns parsed data directly)
-async function json(method, path, body) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    credentials: 'include',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const ct = res.headers.get('content-type') || '';
-  const data = ct.includes('application/json') ? await res.json() : await res.text();
-  if (!res.ok) throw new Error((data && data.error) || res.statusText || 'Request failed');
-  return data;
-}
-
-// Axios-like wrapper that returns { data }
-async function requestAxios(method, path, { params, body, headers } = {}) {
-  const isFormData = body instanceof FormData;
-  const res = await fetch(buildUrl(path, params), {
-    method,
-    credentials: 'include',
-    headers: isFormData ? headers : body ? { 'Content-Type': 'application/json', ...(headers || {}) } : headers,
-    body: isFormData ? body : body ? JSON.stringify(body) : undefined,
-  });
+  if (res.status === 204) return { status: 204, data: null, res };
 
   const ct = res.headers.get('content-type') || '';
-  const data = ct.includes('application/json') ? await res.json().catch(() => ({})) : await res.text();
+  const data = isJSON(ct) ? await res.json().catch(() => ({})) : await res.text();
 
   if (!res.ok) {
     const message = (data && (data.error || data.message)) || `${res.status} ${res.statusText}`;
@@ -70,75 +66,120 @@ async function requestAxios(method, path, { params, body, headers } = {}) {
     throw err;
   }
 
-  return { data };
+  return { status: res.status, data, res };
 }
 
-// ---------- Named exports used elsewhere ----------
-export async function getMe() {
-  // Server should implement: GET /api/me
-  // returns 401 if unauthenticated
-  return request('/api/me', { method: 'GET' });
+async function request(path, opts) {
+  const { data } = await coreFetch(path, opts);
+  return data;
 }
 
-// ---------- High-level API (axios-like & convenience) ----------
+async function requestAxios(method, path, { params, body, headers, timeoutMs } = {}) {
+  const { data, status, res } = await coreFetch(path, { method, params, body, headers, timeoutMs });
+  return { data, status, res };
+}
+
+// ---------- /api/me cache ----------
+let _me = null;
+let _meInflight = null;
+
+export async function getMe(opts = { redirectOn401: false }) {
+  if (_me) return _me;
+  if (_meInflight) return _meInflight;
+
+  _meInflight = request('/api/me', { method: 'GET' })
+    .then((u) => {
+      _me = u || null;
+      return _me;
+    })
+    .catch((e) => {
+      _me = null;
+      if (opts.redirectOn401 && e?.status === 401) handleUnauthorized();
+      return null;
+    })
+    .finally(() => {
+      _meInflight = null;
+    });
+
+  return _meInflight;
+}
+
+export function clearMeCache() {
+  _me = null;
+}
+
+// ---------- Paywall helpers ----------
+export function isPaidOrAdmin(user) {
+  if (!user) return false;
+  return user.role === 'admin' || !!user.isLifetime;
+}
+
+export async function ensurePaidOrAdminClient(toPath = '/checkout') {
+  const me = await getMe();
+  if (!isPaidOrAdmin(me)) {
+    if (typeof window !== 'undefined') {
+      const next = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location.assign(`${toPath}?next=${next}&reason=payment_required`);
+    }
+    throw new Error('payment_required');
+  }
+  return me;
+}
+
+// ---------- High-level API ----------
 const api = {
-  // ----- axios-like methods (used by Admin.vue) -----
-  get:    (path, opts = {})          => requestAxios('GET',    path, { params: opts.params, headers: opts.headers }),
-  post:   (path, body, headers)      => requestAxios('POST',   path, { body, headers }),
-  patch:  (path, body, headers)      => requestAxios('PATCH',  path, { body, headers }),
-  delete: (path, opts = {})          => requestAxios('DELETE', path, { params: opts.params, headers: opts.headers }),
+  // axios-like
+  get:    (path, opts = {})        => requestAxios('GET',    path, opts),
+  post:   (path, body, headers)    => requestAxios('POST',   path, { body, headers }),
+  patch:  (path, body, headers)    => requestAxios('PATCH',  path, { body, headers }),
+  delete: (path, opts = {})        => requestAxios('DELETE', path, opts),
 
-  // ----- auth redirect URLs (full-page redirects) -----
+  // OAuth redirect URLs
   googleAuthUrl:   `${BASE}/auth/google`,
   facebookAuthUrl: `${BASE}/auth/facebook`,
 
-  // ----- convenience endpoints returning data directly -----
-  getGematrias:          ()             => request('/api/gematrias'),
-  createGematria:        (payload)      => request('/api/gematrias', { method: 'POST', body: JSON.stringify(payload) }),
+  // Auth/session
+  logout: () => request('/auth/logout', { method: 'POST' }),
 
-  createEntry:           (payload)      => request('/api/entries', { method: 'POST', body: JSON.stringify(payload) }),
-  myEntries:             ()             => request('/api/my-entries'),
-
-  searchPublic:          (params)       => request('/api/search' + (params ? `?${new URLSearchParams(params)}` : '')),
-
-  setEntryVisibility:    (id, visibility) =>
-    request(`/api/entries/${id}/visibility`, {
-      method: 'PATCH',
-      body: JSON.stringify({ visibility }),
-    }),
-
-  logout() { // POST /api/auth/logout
-    return json('POST', '/api/auth/logout');
-  },
-
-  getMiniProfile:        (userId)       => request(`/api/users/${userId}/mini`),
-  getMyProfile:          ()             => request(`/api/me/full`),
-  updateMyProfile:       (data)         => request(`/api/me`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // Profiles (paywalled on server)
+  getMiniProfile:  (userId) => request(`/api/users/${userId}/mini`),
+  getMyProfile:    () => request('/api/me/full'),
+  updateMyProfile: (data) => request('/api/me', { method: 'PATCH', body: data }),
 
   uploadMyPhoto: (file) => {
     const form = new FormData();
     form.append('photo', file);
-    // No manual Content-Type for FormData
-    return fetch(`${BASE}/api/me/photo`, {
-      method: 'POST',
-      credentials: 'include',
-      body: form,
-    }).then(async (r) => {
-      const ct = r.headers.get('content-type') || '';
-      const data = ct.includes('application/json') ? await r.json().catch(() => ({})) : await r.text();
-      if (!r.ok) {
-        const message = (data && (data.error || data.message)) || `${r.status} ${r.statusText}`;
-        throw new Error(message);
-      }
-      return data;
-    });
+    return request('/api/me/photo', { method: 'POST', body: form });
   },
 
+  // Gematria (paywalled server-side)
+  getGematrias:    () => request('/api/gematrias'),
+  createGematria:  (payload) => request('/api/gematrias', { method: 'POST', body: payload }),
+
+  // Entries (paywalled server-side)
+  createEntry:     (payload) => request('/api/entries', { method: 'POST', body: payload }),
+  myEntries:       () => request('/api/my-entries'),
+  setEntryVisibility: (id, visibility) =>
+    request(`/api/entries/${id}/visibility`, { method: 'PATCH', body: { visibility } }),
+
+  // Public search (no auth)
+  searchPublic: (params) => request(`/api/search${toQS(params)}`),
+
+  // Checkout (auth required but not paywalled)
   createCheckoutSession: () => request('/api/create-checkout-session', { method: 'POST' }),
 };
 
 export default api;
 
-// Optional named re-exports if you like importing individually
-export const { get, post, patch, delete: del, googleAuthUrl, facebookAuthUrl } = api;
+// Optional named re-exports
+export const {
+  get, post, patch, delete: del, googleAuthUrl, facebookAuthUrl,
+} = api;
+
+// ---------- Convenience: buildUrl for components that need it ----------
+export function buildUrl(path, params) {
+  return BASE + path + toQS(params);
+}
+
+
 

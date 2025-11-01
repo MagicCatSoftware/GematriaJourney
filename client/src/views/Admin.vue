@@ -9,7 +9,9 @@
           <h2>Overview</h2>
           <button class="btn" @click="loadAll">Refresh</button>
         </div>
-        <div class="grid stats">
+
+        <div v-if="errors.overview" class="error">{{ errors.overview }}</div>
+        <div class="grid stats" v-else>
           <div class="stat"><div class="num">{{ overview.users }}</div><div class="lbl">Users</div></div>
           <div class="stat"><div class="num">{{ overview.banned }}</div><div class="lbl">Banned</div></div>
           <div class="stat"><div class="num">{{ overview.gematrias }}</div><div class="lbl">Gematrias</div></div>
@@ -20,9 +22,10 @@
       <div class="card">
         <div class="card__head">
           <h2>Users</h2>
-          <input v-model="q" @input="loadUsers" class="input" placeholder="Search users…"/>
+          <input v-model="q" @input="debouncedLoadUsers" class="input" placeholder="Search users…" />
         </div>
-        <div class="table">
+        <div v-if="errors.users" class="error">{{ errors.users }}</div>
+        <div class="table" v-else>
           <div class="row head">
             <div>Name</div><div>Email</div><div>Role</div><div>Status</div><div>Actions</div>
           </div>
@@ -50,11 +53,12 @@
       <div class="card two-col">
         <div>
           <div class="card__head"><h2>Gematrias</h2></div>
-          <div class="table">
-            <div class="row head"><div>ID</div><div>Phrase</div><div>Actions</div></div>
+          <div v-if="errors.gematrias" class="error">{{ errors.gematrias }}</div>
+          <div class="table" v-else>
+            <div class="row head"><div>ID</div><div>Name</div><div>Actions</div></div>
             <div v-for="g in gematrias" :key="g._id" class="row">
               <div class="mono">{{ g._id }}</div>
-              <div class="clip">{{ g.phrase || '—' }}</div>
+              <div class="clip">{{ g.name || g.phrase || '—' }}</div>
               <div class="actions"><button class="btn tiny danger" @click="delGematria(g)">Delete</button></div>
             </div>
           </div>
@@ -62,11 +66,12 @@
 
         <div>
           <div class="card__head"><h2>Entries</h2></div>
-          <div class="table">
+          <div v-if="errors.entries" class="error">{{ errors.entries }}</div>
+          <div class="table" v-else>
             <div class="row head"><div>ID</div><div>Title</div><div>Actions</div></div>
             <div v-for="e in entries" :key="e._id" class="row">
               <div class="mono">{{ e._id }}</div>
-              <div class="clip">{{ e.title || e.text || '—' }}</div>
+              <div class="clip">{{ e.title || e.text || e.phrase || '—' }}</div>
               <div class="actions"><button class="btn tiny danger" @click="delEntry(e)">Delete</button></div>
             </div>
           </div>
@@ -81,48 +86,100 @@
 import { ref } from 'vue';
 import api from '../api';
 
+// state
 const overview = ref({ users: 0, banned: 0, gematrias: 0, entries: 0 });
 const users = ref([]);
 const gematrias = ref([]);
 const entries = ref([]);
 const q = ref('');
+const errors = ref({ overview: '', users: '', gematrias: '', entries: '' });
+
+// helpers to parse various response shapes safely
+function asArray(x, fallback = []) {
+  if (Array.isArray(x)) return x;
+  if (x && Array.isArray(x.items)) return x.items;
+  if (x && Array.isArray(x.gematrias)) return x.gematrias;
+  if (x && Array.isArray(x.entries)) return x.entries;
+  if (x && Array.isArray(x.users)) return x.users;
+  return fallback;
+}
 
 async function loadOverview() {
-  const r = await api.get('/admin/overview');
-  overview.value = r.data;
+  errors.value.overview = '';
+  try {
+    const r = await api.get('/admin/overview');
+    // expect { users, banned, gematrias, entries }
+   
+    overview.value = {
+      users: Number(r.data?.users || 0),
+      banned: Number(r.data?.banned || 0),
+      gematrias: Number(r.data?.gematrias || 0),
+      entries: Number(r.data?.entries || 0),
+    };
+  } catch (e) {
+    console.error('overview error', e);
+    errors.value.overview = e?.message || 'Failed to load overview';
+  }
 }
+
 async function loadUsers() {
-  const r = await api.get('/admin/users', { params: { q: q.value }});
-  users.value = r.data.users;
+  errors.value.users = '';
+  try {
+    const r = await api.get('/admin/users', { params: { q: q.value } });
+    // accept either { users: [...] } or [...]
+    users.value = asArray(r.data);
+  } catch (e) {
+    console.error('users error', e);
+    errors.value.users = e?.message || 'Failed to load users';
+  }
 }
-// For demo: fetch latest 200 items (make proper endpoints later if needed)
+
 async function loadGematrias() {
-  const r = await api.get('/api/gematrias?limit=200'); // implement or adjust
-  gematrias.value = r.data.items || r.data.gematrias || [];
+  errors.value.gematrias = '';
+  try {
+    // Your server: GET /api/gematrias -> returns an ARRAY
+    const r = await api.get('/api/gematrias', { params: { limit: 200 } });
+    gematrias.value = asArray(r.data);
+  } catch (e) {
+    console.error('gematrias error', e);
+    errors.value.gematrias = e?.message || 'Failed to load gematrias';
+  }
 }
+
 async function loadEntries() {
-  const r = await api.get('/api/entries?limit=200'); // implement or adjust
-  entries.value = r.data.items || r.data.entries || [];
+  errors.value.entries = '';
+  try {
+    // Your server: GET /api/entries -> returns { entries: [...] }
+    const r = await api.get('/api/entries', { params: { limit: 200 } });
+    entries.value = asArray(r.data);
+  } catch (e) {
+    console.error('entries error', e);
+    errors.value.entries = e?.message || 'Failed to load entries';
+  }
 }
 
 async function setRole(u) {
   await api.patch(`/admin/users/${u._id}/role`, { role: u.role });
 }
+
 async function toggleBan(u) {
   const ban = !u.isBanned;
   await api.patch(`/admin/users/${u._id}/ban`, { ban });
   u.isBanned = ban;
 }
+
 async function delUser(u) {
   if (!confirm(`Delete user ${u.email}? This also removes their content.`)) return;
   await api.delete(`/admin/users/${u._id}`);
   await loadUsers(); await loadOverview();
 }
+
 async function delGematria(g) {
   if (!confirm(`Delete gematria ${g._id}?`)) return;
   await api.delete(`/admin/gematrias/${g._id}`);
   await loadGematrias(); await loadOverview();
 }
+
 async function delEntry(e) {
   if (!confirm(`Delete entry ${e._id}?`)) return;
   await api.delete(`/admin/entries/${e._id}`);
@@ -132,6 +189,14 @@ async function delEntry(e) {
 async function loadAll() {
   await Promise.all([loadOverview(), loadUsers(), loadGematrias(), loadEntries()]);
 }
+
+// tiny debounce for search box
+let t;
+function debouncedLoadUsers() {
+  clearTimeout(t);
+  t = setTimeout(loadUsers, 250);
+}
+
 loadAll();
 </script>
 

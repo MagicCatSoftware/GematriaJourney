@@ -191,7 +191,7 @@
 <script setup>
 import { onMounted, ref, reactive, computed } from 'vue';
 import api from '../api';
-import { SYSTEMS, breakdownByMap } from '../gematria';
+import { SYSTEMS, breakdownByMap } from '../Gematria';
 
 // ---------- ENTRY FORM ----------
 const phrase = ref('');

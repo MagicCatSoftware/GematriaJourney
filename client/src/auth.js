@@ -2,11 +2,7 @@
 import { reactive } from 'vue';
 import api from './api';
 
-const state = reactive({
-  me: null,
-  loading: false,
-  error: null,
-});
+const state = reactive({ me:null, loading:false, error:null });
 
 /**
  * Fetches the current user profile from the server.
@@ -36,7 +32,7 @@ export async function logout() {
       await api.logout();
     } else {
       // fallback if logout() not defined
-      await fetch('/api/auth/logout', {
+      await fetch('/auth/logout', {
         method: 'POST',
         credentials: 'include',
       });

@@ -166,7 +166,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue';
 import api from '../api';
-import { SYSTEMS, breakdownByMap, sumByMap } from '../gematria';
+import { SYSTEMS, breakdownByMap, sumByMap } from '../Gematria';
 import ProfileHoverCard from '../components/ProfileHoverCard.vue';
 
 /* ---------- Calculator (top card) ---------- */

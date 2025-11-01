@@ -3,19 +3,19 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { getMe } from './api';
 
 // Lazy views
-const Home         = () => import('./views/Home.vue');
-const Login        = () => import('./views/Login.vue');
-const AuthSuccess  = () => import('./views/AuthSuccess.vue');
-const CreateGematria = () => import('./views/CreateGematria.vue');
-const CreateEntry  = () => import('./views/CreateEntry.vue');
-const MyEntries    = () => import('./views/MyEntries.vue');
-const PublicSearch = () => import('./views/PublicSearch.vue');
-const Checkout     = () => import('./views/Checkout.vue');
-const Workspace    = () => import('./views/Workspace.vue');
-const MyProfile    = () => import('./views/MyProfile.vue');
-const Admin        = () => import('./views/Admin.vue'); // ✅ added
+const Home           = () => import('./views/Home.vue');
+const Login          = () => import('./views/Login.vue');
+const AuthSuccess    = () => import('./views/AuthSuccess.vue');
+const CreateEntry    = () => import('./views/CreateEntry.vue');
 
-// Simple in-module cache to avoid calling /api/me on every route
+const PublicSearch   = () => import('./views/PublicSearch.vue');
+const Checkout       = () => import('./views/Checkout.vue');
+const Workspace      = () => import('./views/Workspace.vue');
+const MyProfile      = () => import('./views/MyProfile.vue');
+const Admin          = () => import('./views/Admin.vue');
+const PaymentSuccess = () => import('./views/PaymentSuccess.vue');
+
+// Simple in-module cache
 let cachedMe = null;
 let mePromise = null;
 
@@ -23,17 +23,9 @@ async function ensureMe() {
   if (cachedMe) return cachedMe;
   if (!mePromise) {
     mePromise = getMe()
-      .then(u => {
-        cachedMe = u || null;
-        return cachedMe;
-      })
-      .catch(() => {
-        cachedMe = null;
-        return null;
-      })
-      .finally(() => {
-        mePromise = null;
-      });
+      .then(u => { cachedMe = u || null; return cachedMe; })
+      .catch(() => { cachedMe = null; return null; })
+      .finally(() => { mePromise = null; });
   }
   return mePromise;
 }
@@ -41,54 +33,85 @@ async function ensureMe() {
 function hasRequiredRole(user, required) {
   if (!required) return true;
   if (!user) return false;
-  const r = user.role ?? user.roles;
-  if (Array.isArray(r)) return r.includes(required);
-  return r === required;
+  const role = user.role ?? user.roles;
+  if (Array.isArray(role)) return role.includes(required);
+  return role === required;
+}
+function isPaidOrAdmin(user) {
+  if (!user) return false;
+  return user.role === 'admin' || !!user.isLifetime;
 }
 
+// Routes
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/',               name: 'home',        component: Home },
-    { path: '/login',          name: 'login',       component: Login },
-    { path: '/auth-success',   name: 'auth-success',component: AuthSuccess },
+    { path: '/',               name: 'home',            component: Home },
+    { path: '/login',          name: 'login',           component: Login },
+    { path: '/auth-success',   name: 'auth-success',    component: AuthSuccess },
 
     // Public
-    { path: '/search',         name: 'search',      component: PublicSearch },
+    { path: '/search',         name: 'search',          component: PublicSearch },
 
-    // Authed
-    { path: '/my-entries',     name: 'my-entries',  component: MyEntries,  meta: { auth: true } },
-    { path: '/checkout',       name: 'checkout',    component: Checkout,   meta: { auth: true } },
-    { path: '/workspace',      name: 'workspace',   component: Workspace,  meta: { auth: true } },
-    { path: '/my-profile',     name: 'my-profile',  component: MyProfile,  meta: { auth: true } },
+    // Authed but not paywalled
+    { path: '/checkout',       name: 'checkout',        component: Checkout,        meta: { auth: true } },
+    { path: '/payment-success',name: 'payment-success', component: PaymentSuccess,  meta: { auth: true } },
 
-    // ✅ Admin-only
-    { path: '/admin',          name: 'admin',       component: Admin,      meta: { auth: true} },
+    // Paywalled (paid or admin)
+    { path: '/workspace',      name: 'workspace',       component: Workspace,       meta: { auth: true, paid: true } },
+    { path: '/my-profile',     name: 'my-profile',      component: MyProfile,       meta: { auth: true, paid: true } },
 
-    // Optional: 404
-    { path: '/:pathMatch(.*)*', name: 'not-found',  component: Home },
+    // Admin-only
+    { path: '/admin',          name: 'admin',           component: Admin,           meta: { auth: true, role: 'admin' } },
+
+    // 404 fallback
+    { path: '/:pathMatch(.*)*', name: 'not-found', component: Home },
   ],
 });
 
-// Global guard: checks auth, then role if required
-router.beforeEach(async (to) => {
-  // No auth needed → allow
-  if (!to.meta?.auth) return true;
+// ---- New: unpaid redirect policy ----
+const UNPAID_ALLOW = new Set([
+  'home',
+  'login',
+  'auth-success',
+  'checkout',
+  'payment-success',
+  'search'
+]);
 
-  // Ensure we know the current user
+router.beforeEach(async (to) => {
+  // Home is always allowed without any check
+  if (to.name === 'home') return true;
+
+  // We only need "me" when navigating away from Home
   const me = await ensureMe();
-  if (!me) {
-    // Not logged in → go to login, preserve destination
+
+  // If route requires auth and user isn't logged in → go to login
+  if (to.meta?.auth && !me) {
     return { name: 'login', query: { next: to.fullPath } };
   }
 
-  // Role check (e.g., Admin)
+  // Role-gated routes (e.g., admin)
   if (to.meta?.role && !hasRequiredRole(me, to.meta.role)) {
-    // Lacks required role → send home (or route to a 403 page if you have one)
     return { name: 'home', query: { denied: '1' } };
+  }
+
+  // Global unpaid guard:
+  // If user is logged in but NOT paid/admin, only allow allow-list routes.
+  if (me && !isPaidOrAdmin(me) && !UNPAID_ALLOW.has(String(to.name || ''))) {
+    return { name: 'checkout', query: { next: to.fullPath, reason: 'payment_required' } };
+  }
+
+  // Per-route paywall still respected (kept for clarity)
+  if (to.meta?.paid && !isPaidOrAdmin(me)) {
+    return { name: 'checkout', query: { next: to.fullPath, reason: 'payment_required' } };
   }
 
   return true;
 });
 
 export default router;
+
+// Optional: helper to bust the cache after payment if needed elsewhere
+export function clearMeCache() { cachedMe = null; }
+

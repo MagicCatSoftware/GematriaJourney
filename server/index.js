@@ -13,7 +13,7 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 
 import { authRequired } from './middleware/auth.js';
-import { requirePaid } from './middleware/roles.js';
+import { requirePaidOrAdmin, requireAdmin, requireAuthOnly } from './middleware/roles.js';
 
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as FacebookStrategy } from 'passport-facebook';
@@ -32,6 +32,8 @@ import {
   encryptWithKey,
   decryptWithKey
 } from './utils/crypto.js';
+
+
 
 // ---------- Config ----------
 const PORT = process.env.PORT || 4002;
@@ -53,17 +55,24 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   const sig = req.headers['stripe-signature'];
   try {
     const event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+
     if (event.type === 'checkout.session.completed') {
-      const sessionObj = event.data.object;
-      const email = sessionObj.customer_email;
-      if (email) {
-        const user = await User.findOne({ email });
-        if (user) {
-          user.isLifetime = true;
-          await user.save();
-        }
+      const s = event.data.object;
+      const ownerId = s.client_reference_id;
+      const email = s.customer_email || s.customer_details?.email;
+
+      let user = null;
+      if (ownerId) user = await User.findById(ownerId);
+      if (!user && email) user = await User.findOne({ email });
+
+      if (user && !user.isLifetime) {
+        user.isLifetime = true;
+        user.lifetimeAt = new Date();
+        user.lastCheckoutSessionId = s.id;
+        await user.save();
       }
     }
+
     res.json({ received: true });
   } catch (err) {
     console.error('webhook error', err);
@@ -93,6 +102,8 @@ app.use(session({
 
 app.use(passport.initialize());
 app.use(passport.session());
+
+app.use('/admin', adminRouter);
 
 // ---------- Uploads (photos) ----------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -147,7 +158,7 @@ passport.deserializeUser(async (id, done) => {
     done(e);
   }
 });
-app.use('/admin', adminRouter);
+
 // ---------- OAuth Strategies ----------
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID || '',
@@ -215,24 +226,50 @@ app.get('/auth/facebook/callback',
 
 app.get('/auth/failure', (req,res)=>res.send('Auth failed'));
 
-// ---------- Me ----------
+// AFTER
+
+// near other helpers
+async function assertNotAlreadyPaid(userId) {
+  const fresh = await User.findById(userId).select('_id role isLifetime').lean();
+  if (!fresh) throw new Error('user_not_found');
+  if (fresh.role === 'admin') {
+    const e = new Error('admins_do_not_pay');
+    e.status = 409;
+    throw e;
+  }
+  if (fresh.isLifetime) {
+    const e = new Error('already_lifetime');
+    e.status = 409;
+    throw e;
+  }
+  return fresh;
+}
+
+
 app.get('/api/me', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'unauthenticated' });
-  const { _id, name, email, isLifetime, photoUrl, bio } = req.user;
-  res.json({ id: _id, name, email, isLifetime: !!isLifetime, photoUrl: photoUrl || '', bio: bio || '' });
+  const { _id, name, email, isLifetime, photoUrl, bio, role } = req.user;
+  res.json({
+    id: _id,
+    name,
+    email,
+    role: role || 'user',     // <-- include role for guards
+    isLifetime: !!isLifetime, // <-- still include paid flag
+    photoUrl: photoUrl || '',
+    bio: bio || ''
+  });
 });
-
 // Full profile (self)
-app.get('/api/me/full', ensureAuth, async (req, res) => {
+app.get('/api/me/full', requirePaidOrAdmin, async (req, res) => {
   try {
     const u = await User.findById(req.user._id)
-      .select('_id role name email photoUrl createdAt bio')
+      .select('_id role name isLifetime email photoUrl createdAt bio')
       .lean();
     res.json(u);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.patch('/api/me', ensureAuth, async (req, res) => {
+app.patch('/api/me', requirePaidOrAdmin, async (req, res) => {
   try {
     const { name, bio } = req.body || {};
     const update = {};
@@ -245,7 +282,7 @@ app.patch('/api/me', ensureAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/me/photo', ensureAuth, upload.single('photo'), async (req, res) => {
+app.post('/api/me/photo', requirePaidOrAdmin, upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'no file' });
     const photoUrl = `${SERVER_URL}/uploads/${req.file.filename}`;
@@ -258,7 +295,7 @@ app.post('/api/me/photo', ensureAuth, upload.single('photo'), async (req, res) =
 app.get('/api/users/:id/mini', async (req, res) => {
   try {
     const u = await User.findById(req.params.id)
-      .select('_id name email photoUrl createdAt bio')
+      .select('_id name photoUrl createdAt bio')
       .lean();
     if (!u) return res.status(404).json({ error: 'not found' });
     res.json(u);
@@ -266,7 +303,7 @@ app.get('/api/users/:id/mini', async (req, res) => {
 });
 
 // ---------- Gematria CRUD ----------
-app.post('/api/gematrias', ensureAuth, async (req,res) => {
+app.post('/api/gematrias', requirePaidOrAdmin, async (req,res) => {
   const { name, letters } = req.body; // letters = { a:1, b:2, ... }
   try {
     const doc = await Gematria.create({
@@ -286,7 +323,7 @@ app.get('/api/gematrias', async (req,res)=> {
 });
 
 // ---------- Entry create / list (private-encrypted or public) ----------
-app.post('/api/entries', ensureAuth, async (req,res) => {
+app.post('/api/entries', requirePaidOrAdmin, async (req,res) => {
   const { gematriaId, phrase, visibility='private' } = req.body;
   try {
     const gem = await Gematria.findById(gematriaId);
@@ -320,7 +357,7 @@ app.post('/api/entries', ensureAuth, async (req,res) => {
   } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/entries', ensureAuth,  async (req, res) => {
+app.get('/api/entries', requirePaidOrAdmin,  async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 200, 1000);
     const skip  = Math.max(Number(req.query.skip) || 0, 0);
@@ -350,7 +387,7 @@ app.get('/api/entries', ensureAuth,  async (req, res) => {
 });
 
 // Your entries (decrypt private)
-app.get('/api/my-entries', ensureAuth, async (req, res) => {
+app.get('/api/my-entries', requirePaidOrAdmin, async (req, res) => {
   try {
     const entries = await Entry.find({ owner: req.user._id })
       .populate('gematria')
@@ -375,7 +412,7 @@ app.get('/api/my-entries', ensureAuth, async (req, res) => {
 });
 
 // Toggle visibility publish/private
-app.patch('/api/entries/:id/visibility', ensureAuth, async (req, res) => {
+app.patch('/api/entries/:id/visibility', requirePaidOrAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { visibility } = req.body;
@@ -518,13 +555,33 @@ app.get('/api/public/entries', async (req, res) => {
   }
 });
 
-// ---------- Stripe checkout ----------
-app.post('/api/create-checkout-session', ensureAuth, async (req, res) => {
+app.post('/api/create-checkout-session', requireAuthOnly, async (req, res) => {
   try {
-    const sessionObj = await stripe.checkout.sessions.create({
+    await assertNotAlreadyPaid(req.user._id);
+
+    let sessionUrl;
+
+    try {
+      const openSessions = await stripe.checkout.sessions.list({
+        limit: 1,
+        status: 'open',
+        client_reference_id: String(req.user._id)
+      });
+      const existing = openSessions.data[0];
+      if (existing && existing.url) {
+        sessionUrl = existing.url;
+        return res.json({ url: sessionUrl, reused: true });
+      }
+    } catch (err) {
+      console.warn('[stripe] unable to reuse open session:', err.message);
+      // Continue to create new session
+    }
+
+    const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'payment',
       customer_email: req.user.email,
+      client_reference_id: String(req.user._id),
       line_items: [{
         price_data: {
           currency: 'usd',
@@ -535,9 +592,49 @@ app.post('/api/create-checkout-session', ensureAuth, async (req, res) => {
       }],
       success_url: `${CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${CLIENT_URL}/payment-cancel`
+    }, {
+      idempotencyKey: `checkout:${req.user._id}:${Date.now() >> 12}`
     });
-    res.json({ url: sessionObj.url });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+
+    res.json({ url: session.url });
+  } catch (e) {
+    const status = e.status || 500;
+    res.status(status).json({ error: e.message || 'create_session_failed' });
+  }
+});
+
+app.post('/api/stripe/confirm-session', requireAuthOnly, async (req, res) => {
+  try {
+    const { session_id } = req.body || {};
+    if (!session_id) return res.status(400).json({ error: 'session_id required' });
+
+    const session = await stripe.checkout.sessions.retrieve(session_id, {
+      expand: ['customer', 'payment_intent']
+    });
+
+    // Verify paid
+    const paid = session.payment_status === 'paid';
+    if (!paid) return res.status(409).json({ error: 'payment_not_paid' });
+
+    // Verify ownership: by client_reference_id or email
+    const ownerId = session.client_reference_id;
+    const email = session.customer_details?.email || session.customer_email;
+
+    let ok = false;
+    if (ownerId && String(ownerId) === String(req.user._id)) ok = true;
+    if (email && email === req.user.email) ok = true;
+
+    if (!ok) {
+      return res.status(403).json({ error: 'forbidden', message: 'Session does not belong to current user' });
+    }
+
+    // Idempotent upgrade
+    await User.findByIdAndUpdate(req.user._id, { isLifetime: true });
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('[stripe] confirm-session error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/auth/logout', (req, res) => {
