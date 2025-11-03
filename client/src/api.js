@@ -18,9 +18,12 @@ const withTimeout = (ms, signal) => {
 
 // ---------- 401 handler (single place) ----------
 function handleUnauthorized(to) {
-  const next = encodeURIComponent(to || (typeof window !== 'undefined'
-    ? window.location.pathname + window.location.search
-    : '/'));
+  const next = encodeURIComponent(
+    to ||
+      (typeof window !== 'undefined'
+        ? window.location.pathname + window.location.search
+        : '/')
+  );
   const target = `/login?next=${next}`;
   if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
     window.location.assign(target);
@@ -28,7 +31,10 @@ function handleUnauthorized(to) {
 }
 
 // ---------- Core fetch wrappers ----------
-async function coreFetch(path, { method = 'GET', params, body, headers, timeoutMs, rawBody } = {}) {
+async function coreFetch(
+  path,
+  { method = 'GET', params, body, headers, timeoutMs, rawBody } = {}
+) {
   const url = BASE + path + toQS(params);
   const isFormData = body instanceof FormData;
 
@@ -161,6 +167,14 @@ const api = {
   myEntries:       () => request('/api/my-entries'),
   setEntryVisibility: (id, visibility) =>
     request(`/api/entries/${id}/visibility`, { method: 'PATCH', body: { visibility } }),
+
+  // NEW: Delete entry (owner only)
+  deleteEntry: (id) =>
+    request(`/api/entries/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // NEW: Publish all private entries (bulk)
+  publishAllEntries: () =>
+    request('/api/entries/publish-all', { method: 'POST' }),
 
   // Public search (no auth)
   searchPublic: (params) => request(`/api/search${toQS(params)}`),

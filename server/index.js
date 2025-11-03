@@ -555,6 +555,62 @@ app.get('/api/public/entries', async (req, res) => {
   }
 });
 
+app.delete('/api/entries/:id', requirePaidOrAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const ent = await Entry.findById(id);
+    if (!ent) return res.status(404).json({ error: 'entry_not_found' });
+    if (String(ent.owner) !== String(req.user._id)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    await ent.deleteOne();
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('delete entry error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/entries/publish-all', requirePaidOrAdmin, async (req, res) => {
+  try {
+    const privates = await Entry.find({ owner: req.user._id, visibility: 'private' }).lean();
+    if (!privates.length) return res.json({ published: 0, skipped: 0 });
+
+    const userKeyBuffer = decryptUserKeyWithMaster(MASTER_KEY, req.user.encryptedUserKey);
+    let published = 0, skipped = 0;
+
+    // Process sequentially to keep it simple
+    for (const p of privates) {
+      if (!p.ciphertext) { skipped++; continue; }
+      let payload;
+      try {
+        payload = JSON.parse(decryptWithKey(userKeyBuffer, p.ciphertext));
+      } catch {
+        skipped++; continue;
+      }
+      if (!payload || typeof payload.phrase !== 'string' || typeof payload.result !== 'number') {
+        skipped++; continue;
+      }
+
+      // Make public
+      await Entry.updateOne(
+        { _id: p._id, owner: req.user._id },
+        {
+          $set: { phrase: payload.phrase, result: payload.result, visibility: 'public' },
+          $unset: { ciphertext: 1 }
+        }
+      );
+      published++;
+    }
+
+    res.json({ published, skipped });
+  } catch (e) {
+    console.error('publish all error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
 app.post('/api/create-checkout-session', requireAuthOnly, async (req, res) => {
   try {
     await assertNotAlreadyPaid(req.user._id);
