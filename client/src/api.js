@@ -65,7 +65,8 @@ async function coreFetch(
   const data = isJSON(ct) ? await res.json().catch(() => ({})) : await res.text();
 
   if (!res.ok) {
-    const message = (data && (data.error || data.message)) || `${res.status} ${res.statusText}`;
+    const message =
+      (data && (data.error || data.message)) || `${res.status} ${res.statusText}`;
     const err = new Error(message);
     err.status = res.status;
     err.data = data;
@@ -120,11 +121,20 @@ export function isPaidOrAdmin(user) {
   return user.role === 'admin' || !!user.isLifetime;
 }
 
+// Bulk submit to master list (named export)
+export async function submitAllToMaster() {
+  return request('/api/master/bulk-submit', {
+    method: 'POST',
+  });
+}
+
 export async function ensurePaidOrAdminClient(toPath = '/checkout') {
   const me = await getMe();
   if (!isPaidOrAdmin(me)) {
     if (typeof window !== 'undefined') {
-      const next = encodeURIComponent(window.location.pathname + window.location.search);
+      const next = encodeURIComponent(
+        window.location.pathname + window.location.search
+      );
       window.location.assign(`${toPath}?next=${next}&reason=payment_required`);
     }
     throw new Error('payment_required');
@@ -159,20 +169,25 @@ const api = {
   },
 
   // Gematria (paywalled server-side)
-  getGematrias:    () => request('/api/gematrias'),
-  createGematria:  (payload) => request('/api/gematrias', { method: 'POST', body: payload }),
+  getGematrias:   () => request('/api/gematrias'),
+  createGematria: (payload) =>
+    request('/api/gematrias', { method: 'POST', body: payload }),
 
   // Entries (paywalled server-side)
-  createEntry:     (payload) => request('/api/entries', { method: 'POST', body: payload }),
-  myEntries:       () => request('/api/my-entries'),
+  createEntry: (payload) =>
+    request('/api/entries', { method: 'POST', body: payload }),
+  myEntries: () => request('/api/my-entries'),
   setEntryVisibility: (id, visibility) =>
-    request(`/api/entries/${id}/visibility`, { method: 'PATCH', body: { visibility } }),
+    request(`/api/entries/${encodeURIComponent(id)}/visibility`, {
+      method: 'PATCH',
+      body: { visibility },
+    }),
 
-  // NEW: Delete entry (owner only)
+  // Delete entry (owner only)
   deleteEntry: (id) =>
     request(`/api/entries/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
-  // NEW: Publish all private entries (bulk)
+  // Publish all private entries (bulk)
   publishAllEntries: () =>
     request('/api/entries/publish-all', { method: 'POST' }),
 
@@ -180,20 +195,55 @@ const api = {
   searchPublic: (params) => request(`/api/search${toQS(params)}`),
 
   // Checkout (auth required but not paywalled)
-  createCheckoutSession: () => request('/api/create-checkout-session', { method: 'POST' }),
+  createCheckoutSession: () =>
+    request('/api/create-checkout-session', { method: 'POST' }),
+
+  // ---------- Master List / Review ----------
+
+   // Bulk submit ALL of the current user's entries to Master List
+  submitAllToMaster,
+
+  // Submit a single entry to Master List for review
+  submitEntryToMaster: (id) =>
+    request(`/api/master/${encodeURIComponent(id)}/submit`, {
+      method: 'POST',
+    }),
+
+  // Fetch ONLY approved, public Master entries (public endpoint)
+  fetchApprovedMasterEntries: (params) =>
+    request(`/api/master/approved${toQS(params)}`),
+
+  // Fetch review queue / master list:
+  // - normal users: (if server allows) whatever it returns
+  // - admins: all statuses
+  fetchMasterList: (params) =>
+    request(`/api/master${toQS(params)}`),
+
+  // Admin: update master status (approved / rejected / pending / none)
+  updateMasterStatus: (id, status) =>
+    request(`/api/master/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: { status },
+    }),
 };
 
 export default api;
 
 // Optional named re-exports
 export const {
-  get, post, patch, delete: del, googleAuthUrl, facebookAuthUrl,
+  get,
+  post,
+  patch,
+  delete: del,
+  googleAuthUrl,
+  facebookAuthUrl,
 } = api;
 
 // ---------- Convenience: buildUrl for components that need it ----------
 export function buildUrl(path, params) {
   return BASE + path + toQS(params);
 }
+
 
 
 

@@ -1,4 +1,3 @@
-// client/src/router.js
 import { createRouter, createWebHistory } from 'vue-router';
 import { getMe } from './api';
 
@@ -14,6 +13,9 @@ const Workspace      = () => import('./views/Workspace.vue');
 const MyProfile      = () => import('./views/MyProfile.vue');
 const Admin          = () => import('./views/Admin.vue');
 const PaymentSuccess = () => import('./views/PaymentSuccess.vue');
+
+// NEW: Master List view
+const MasterList     = () => import('./views/MasterList.vue');
 
 // Simple in-module cache
 let cachedMe = null;
@@ -46,23 +48,26 @@ function isPaidOrAdmin(user) {
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/',               name: 'home',            component: Home },
-    { path: '/login',          name: 'login',           component: Login },
-    { path: '/auth-success',   name: 'auth-success',    component: AuthSuccess },
+    { path: '/',                name: 'home',            component: Home },
+    { path: '/login',           name: 'login',           component: Login },
+    { path: '/auth-success',    name: 'auth-success',    component: AuthSuccess },
 
     // Public
-    { path: '/search',         name: 'search',          component: PublicSearch },
+    { path: '/search',          name: 'search',          component: PublicSearch },
 
     // Authed but not paywalled
-    { path: '/checkout',       name: 'checkout',        component: Checkout,        meta: { auth: true } },
-    { path: '/payment-success',name: 'payment-success', component: PaymentSuccess,  meta: { auth: true } },
+    { path: '/checkout',        name: 'checkout',        component: Checkout,        meta: { auth: true } },
+    { path: '/payment-success', name: 'payment-success', component: PaymentSuccess,  meta: { auth: true } },
 
     // Paywalled (paid or admin)
-    { path: '/workspace',      name: 'workspace',       component: Workspace,       meta: { auth: true, paid: true } },
-    { path: '/my-profile',     name: 'my-profile',      component: MyProfile,       meta: { auth: true, paid: true } },
+    { path: '/workspace',       name: 'workspace',       component: Workspace,       meta: { auth: true, paid: true } },
+    { path: '/my-profile',      name: 'my-profile',      component: MyProfile,       meta: { auth: true, paid: true } },
+
+    // NEW: Master List (paywalled like workspace)
+    { path: '/master-list',     name: 'master-list',     component: MasterList, },
 
     // Admin-only
-    { path: '/admin',          name: 'admin',           component: Admin,           meta: { auth: true, role: 'admin' } },
+    { path: '/admin',           name: 'admin',           component: Admin,           meta: { auth: true, role: 'admin' } },
 
     // 404 fallback
     { path: '/:pathMatch(.*)*', name: 'not-found', component: Home },
@@ -114,4 +119,5 @@ export default router;
 
 // Optional: helper to bust the cache after payment if needed elsewhere
 export function clearMeCache() { cachedMe = null; }
+
 

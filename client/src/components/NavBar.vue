@@ -14,29 +14,25 @@ const isLoggedIn = computed(() => !!user.value);
 const isAdmin = computed(() => user.value?.role === 'admin');
 const isLifetime = computed(() => !!user.value?.isLifetime);
 
-// fetch /api/me directly from the server (same-origin or absolute URL) 
-// Make sure CLIENT is allowed by CORS and the session cookie is sent.
+// fetch /api/me directly from the server
 async function checkSession() {
   checking.value = true;
   error.value = null;
   try {
     const res = await fetch('/api/me', {
       method: 'GET',
-      credentials: 'include', // send cookie
-      headers: { 'Accept': 'application/json' },
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
     });
 
     if (res.status === 401 || res.status === 403) {
-      // Not logged in
       user.value = null;
       checking.value = false;
       return;
     }
 
-    // In some deployments you might get HTML (if request routed to SPA) — guard against that
     const ct = res.headers.get('content-type') || '';
     if (!res.ok) {
-      // try parse json error if possible
       if (ct.includes('application/json')) {
         const j = await res.json().catch(() => null);
         error.value = j?.error || `HTTP ${res.status}`;
@@ -49,7 +45,6 @@ async function checkSession() {
     }
 
     if (!ct.includes('application/json')) {
-      // The request got the SPA shell (HTML) — something's mis-routed; treat as unauthenticated.
       console.warn('Unexpected response content-type for /api/me:', ct);
       user.value = null;
       checking.value = false;
@@ -57,13 +52,12 @@ async function checkSession() {
     }
 
     const data = await res.json();
-    // Expecting shape: { id, name, email, role, isLifetime, ... }
     user.value = {
       id: data.id,
       name: data.name,
       email: data.email,
       role: data.role || 'user',
-      isLifetime: !!data.isLifetime
+      isLifetime: !!data.isLifetime,
     };
   } catch (e) {
     console.error('checkSession error', e);
@@ -75,19 +69,16 @@ async function checkSession() {
 }
 
 onMounted(() => {
-  // Run check once on mount
   checkSession();
-
-  // Optional: refresh session state when coming back to page focus
-  // window.addEventListener('focus', checkSession);
-  // (unregister in onUnmounted if you add it)
 });
 
 // small helpers
 async function handleLogout() {
   try {
     await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
-  } catch (e) { /* ignore */ }
+  } catch (e) {
+    // ignore
+  }
   user.value = null;
   router.push('/login');
 }
@@ -103,6 +94,9 @@ async function handleLogout() {
       <nav class="links">
         <router-link to="/">Home</router-link>
 
+        <!-- Master List is public -->
+        <router-link to="/master-list">Master List</router-link>
+
         <!-- show only when server says logged in AND not admin AND not lifetime -->
         <router-link
           v-if="isLoggedIn && !isAdmin && !isLifetime && !checking"
@@ -116,15 +110,27 @@ async function handleLogout() {
         <router-link v-if="isLoggedIn" to="/my-profile">My Profile</router-link>
         <router-link v-if="isAdmin" to="/admin">Admin</router-link>
 
-        <router-link v-if="!isLoggedIn && !checking" class="btn" to="/login">Log in</router-link>
+        <router-link
+          v-if="!isLoggedIn && !checking"
+          class="btn"
+          to="/login"
+        >
+          Log in
+        </router-link>
+
         <template v-else-if="isLoggedIn">
-          <span class="me-chip">{{ user?.name || user?.email || 'User' }}</span>
-          <button class="btn small ghost logout" @click="handleLogout">Log out</button>
+          <span class="me-chip">
+            {{ user?.name || user?.email || 'User' }}
+          </span>
+          <button class="btn small ghost logout" @click="handleLogout">
+            Log out
+          </button>
         </template>
       </nav>
     </div>
   </header>
 </template>
+
 
 
 

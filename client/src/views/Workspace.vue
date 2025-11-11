@@ -28,7 +28,9 @@
               {{ g?.name || '—' }}
             </option>
           </select>
-          <div class="hint">The server recomputes the result using your selected gematria when you save.</div>
+          <div class="hint">
+            The server recomputes the result using your selected gematria when you save.
+          </div>
         </div>
 
         <div class="field">
@@ -52,7 +54,7 @@
               {{ show.simple ? 'Hide' : 'Show' }} breakdown
             </button>
             <ul v-if="show.simple" class="list">
-              <li v-for="(it, i) in simple.items" :key="'s'+i">
+              <li v-for="(it, i) in simple.items" :key="'s' + i">
                 <code>{{ it[0] }}</code> = <b>{{ it[1] }}</b>
               </li>
             </ul>
@@ -68,7 +70,7 @@
               {{ show.english ? 'Hide' : 'Show' }} breakdown
             </button>
             <ul v-if="show.english" class="list">
-              <li v-for="(it, i) in english.items" :key="'e'+i">
+              <li v-for="(it, i) in english.items" :key="'e' + i">
                 <code>{{ it[0] }}</code> = <b>{{ it[1] }}</b>
               </li>
             </ul>
@@ -84,7 +86,7 @@
               {{ show.hebrew ? 'Hide' : 'Show' }} breakdown
             </button>
             <ul v-if="show.hebrew" class="list">
-              <li v-for="(it, i) in hebrew.items" :key="'h'+i">
+              <li v-for="(it, i) in hebrew.items" :key="'h' + i">
                 <code>{{ it[0] }}</code> = <b>{{ it[1] }}</b>
               </li>
             </ul>
@@ -116,7 +118,10 @@
               {{ showCustom[idFor(g)] ? 'Hide' : 'Show' }} breakdown
             </button>
 
-            <ul v-if="showCustom[idFor(g)] && customCalcs[idFor(g)]?.items?.length" class="list">
+            <ul
+              v-if="showCustom[idFor(g)] && customCalcs[idFor(g)]?.items?.length"
+              class="list"
+            >
               <li
                 v-for="(it, j) in customCalcs[idFor(g)].items"
                 :key="'cgrow-' + idFor(g) + '-' + j"
@@ -125,7 +130,10 @@
               </li>
             </ul>
 
-            <div v-else-if="showCustom[idFor(g)] && !customCalcs[idFor(g)]?.items?.length" class="muted small">
+            <div
+              v-else-if="showCustom[idFor(g)] && !customCalcs[idFor(g)]?.items?.length"
+              class="muted small"
+            >
               No letter map available for breakdown.
             </div>
           </div>
@@ -141,14 +149,24 @@
       <hr class="sep" />
 
       <div class="head">
-  <h2>My Entries</h2>
-  <div class="actions">
-    <button class="btn small" :disabled="publishingAll" @click="publishAll">
-      {{ publishingAll ? 'Publishing…' : 'Publish All' }}
-    </button>
-  </div>
-  <span class="muted small" v-if="entriesLoading">Loading…</span>
-</div>
+        <h2>My Entries</h2>
+        <div class="actions">
+          <!-- Existing publish-all -->
+          <button class="btn small" :disabled="publishingAll" @click="publishAll">
+            {{ publishingAll ? 'Publishing…' : 'Publish All' }}
+          </button>
+
+          <!-- New: submit-all to master -->
+          <button
+            class="btn small ghost"
+            :disabled="submittingAll"
+            @click="submitAllToMaster"
+          >
+            {{ submittingAll ? 'Submitting…' : 'Submit All to Master' }}
+          </button>
+        </div>
+        <span class="muted small" v-if="entriesLoading">Loading…</span>
+      </div>
 
       <div v-if="entriesError" class="error">{{ entriesError }}</div>
       <div v-else>
@@ -174,30 +192,41 @@
 
             <!-- Built-in totals for the entry's phrase -->
             <div v-if="entryPhrase(e)" class="tri">
-              <span class="pill"><b>Simple</b> <span class="mono">{{ entryTotals(entryPhrase(e)).simple }}</span></span>
-              <span class="pill"><b>English</b> <span class="mono">{{ entryTotals(entryPhrase(e)).english }}</span></span>
-              <span class="pill"><b>Hebrew</b> <span class="mono">{{ entryTotals(entryPhrase(e)).hebrew }}</span></span>
+              <span class="pill">
+                <b>Simple</b>
+                <span class="mono">{{ entryTotals(entryPhrase(e)).simple }}</span>
+              </span>
+              <span class="pill">
+                <b>English</b>
+                <span class="mono">{{ entryTotals(entryPhrase(e)).english }}</span>
+              </span>
+              <span class="pill">
+                <b>Hebrew</b>
+                <span class="mono">{{ entryTotals(entryPhrase(e)).hebrew }}</span>
+              </span>
             </div>
 
             <footer class="entry-actions">
-  <button
-    class="btn tiny"
-    :disabled="togglingId === e._id"
-    @click="togglePublish(e)"
-    :title="e.visibility === 'public' ? 'Make Private (will encrypt)' : 'Publish (will decrypt & expose phrase/result)'"
-  >
-    {{ e.visibility === 'public' ? 'Make Private' : 'Publish' }}
-  </button>
+              <button
+                class="btn tiny"
+                :disabled="togglingId === e._id"
+                @click="togglePublish(e)"
+                :title="e.visibility === 'public'
+                  ? 'Make Private (will encrypt)'
+                  : 'Publish (will decrypt & expose phrase/result)'"
+              >
+                {{ e.visibility === 'public' ? 'Make Private' : 'Publish' }}
+              </button>
 
-  <button
-    class="btn tiny"
-    :disabled="deletingId === e._id"
-    @click="onDelete(e)"
-    title="Delete this entry"
-  >
-    {{ deletingId === e._id ? 'Deleting…' : 'Delete' }}
-  </button>
-</footer>
+              <button
+                class="btn tiny"
+                :disabled="deletingId === e._id"
+                @click="onDelete(e)"
+                title="Delete this entry"
+              >
+                {{ deletingId === e._id ? 'Deleting…' : 'Delete' }}
+              </button>
+            </footer>
           </article>
         </div>
       </div>
@@ -218,7 +247,9 @@
         <ul class="gem-list" v-else>
           <li v-for="g in gematrias" :key="idFor(g)">
             <span class="name">{{ g?.name || '—' }}</span>
-            <button class="link" type="button" @click="selectGematria(idFor(g))">Use for entry</button>
+            <button class="link" type="button" @click="selectGematria(idFor(g))">
+              Use for entry
+            </button>
           </li>
         </ul>
       </div>
@@ -229,7 +260,12 @@
       <form @submit.prevent="createGem">
         <div class="field">
           <label>Name</label>
-          <input v-model="gemName" class="input" placeholder="e.g., My Custom System" required />
+          <input
+            v-model="gemName"
+            class="input"
+            placeholder="e.g., My Custom System"
+            required
+          />
         </div>
 
         <div class="letters">
@@ -239,7 +275,9 @@
           </div>
         </div>
 
-        <button class="btn" :disabled="creatingGem">{{ creatingGem ? 'Saving…' : 'Create Gematria' }}</button>
+        <button class="btn" :disabled="creatingGem">
+          {{ creatingGem ? 'Saving…' : 'Create Gematria' }}
+        </button>
         <p v-if="gemError" class="error">{{ gemError }}</p>
         <p v-if="gemOk" class="ok">Gematria created and selected!</p>
       </form>
@@ -248,7 +286,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref, reactive, computed, toRaw } from 'vue';
+import { onMounted, ref, reactive, computed } from 'vue';
 import api from '../api';
 import { SYSTEMS, breakdownByMap } from '../Gematria';
 
@@ -266,19 +304,20 @@ const visibility = ref('private');
 const savingEntry = ref(false);
 const entryError = ref('');
 const entryOk = ref(false);
+const submittingAll = ref(false);
 
 // live totals/breakdowns for built-ins
 const show = reactive({ simple: false, english: false, hebrew: false });
 const toggle = (k) => (show[k] = !show[k]);
 
-const simple  = computed(() =>
-  breakdownByMap(phrase.value, SYSTEMS.simple.map,  SYSTEMS.simple.filter)
+const simple = computed(() =>
+  breakdownByMap(phrase.value, SYSTEMS.simple.map, SYSTEMS.simple.filter)
 );
 const english = computed(() =>
   breakdownByMap(phrase.value, SYSTEMS.english.map, SYSTEMS.english.filter)
 );
-const hebrew  = computed(() =>
-  breakdownByMap(phrase.value, SYSTEMS.hebrew.map,  SYSTEMS.hebrew.filter)
+const hebrew = computed(() =>
+  breakdownByMap(phrase.value, SYSTEMS.hebrew.map, SYSTEMS.hebrew.filter)
 );
 
 // ---------- CUSTOM GEM LIVE CALC ----------
@@ -293,18 +332,26 @@ function isBuiltinGem(g) {
 function toAZMap(g) {
   const out = {};
   const raw = g || {};
-  const arrFrom = (raw.values && Array.isArray(raw.values) && raw.values.length === 26) ? raw.values
-                : (raw.lettersArray && Array.isArray(raw.lettersArray) && raw.lettersArray.length === 26) ? raw.lettersArray
-                : null;
+  const arrFrom =
+    raw.values && Array.isArray(raw.values) && raw.values.length === 26
+      ? raw.values
+      : raw.lettersArray &&
+        Array.isArray(raw.lettersArray) &&
+        raw.lettersArray.length === 26
+      ? raw.lettersArray
+      : null;
 
   for (let i = 0; i < 26; i++) {
     const l = String.fromCharCode(97 + i);
     const v =
       // nested objects first
-      raw.letters?.[l] ?? raw.letters?.[l.toUpperCase?.()] ??
-      raw.map?.[l]     ?? raw.map?.[l.toUpperCase?.()]     ??
+      raw.letters?.[l] ??
+      raw.letters?.[l.toUpperCase?.()] ??
+      raw.map?.[l] ??
+      raw.map?.[l.toUpperCase?.()] ??
       // top-level fields on the doc (your server spreads ...letters)
-      raw[l] ?? raw[l?.toUpperCase?.()] ??
+      raw[l] ??
+      raw[l?.toUpperCase?.()] ??
       // array forms
       (arrFrom ? arrFrom[i] : undefined) ??
       // default
@@ -316,7 +363,9 @@ function toAZMap(g) {
 
 // All user-created gematrias (cards always render)
 const customGems = computed(() =>
-  (Array.isArray(gematrias.value) ? gematrias.value : []).filter(g => g && !isBuiltinGem(g))
+  (Array.isArray(gematrias.value) ? gematrias.value : []).filter(
+    (g) => g && !isBuiltinGem(g)
+  )
 );
 
 const customCalcs = computed(() => {
@@ -333,13 +382,21 @@ const customCalcs = computed(() => {
 
 // show/hide per custom gem (keyed by normalized ID)
 const showCustom = reactive({});
-const toggleCustom = (id) => { showCustom[String(id || '')] = !showCustom[String(id || '')]; };
+const toggleCustom = (id) => {
+  showCustom[String(id || '')] = !showCustom[String(id || '')];
+};
 
 // ---------- SAVE ENTRY ----------
 async function saveEntry() {
-  entryError.value = ''; entryOk.value = false; savingEntry.value = true;
+  entryError.value = '';
+  entryOk.value = false;
+  savingEntry.value = true;
   try {
-    await api.createEntry({ gematriaId: gematriaId.value, phrase: phrase.value, visibility: visibility.value });
+    await api.createEntry({
+      gematriaId: gematriaId.value,
+      phrase: phrase.value,
+      visibility: visibility.value,
+    });
     entryOk.value = true;
     await loadEntries();
   } catch (e) {
@@ -355,7 +412,8 @@ const entriesLoading = ref(true);
 const entriesError = ref('');
 
 async function loadEntries() {
-  entriesLoading.value = true; entriesError.value = '';
+  entriesLoading.value = true;
+  entriesError.value = '';
   try {
     entries.value = await api.myEntries();
   } catch (e) {
@@ -367,12 +425,20 @@ async function loadEntries() {
 
 const publishingAll = ref(false);
 async function publishAll() {
-  if (!confirm('Publish ALL of your private entries? This will decrypt and make them public.')) return;
+  if (
+    !confirm(
+      'Publish ALL of your private entries? This will decrypt and make them public.'
+    )
+  )
+    return;
   publishingAll.value = true;
   try {
-    const res = await api.publishAllEntries(); // see API helper below
-    // Optional toast via alert:
-    alert(`Published ${res?.published || 0} entries${res?.skipped ? `, skipped ${res.skipped}` : ''}.`);
+    const res = await api.publishAllEntries(); // see API helper
+    alert(
+      `Published ${res?.published || 0} entries${
+        res?.skipped ? `, skipped ${res.skipped}` : ''
+      }.`
+    );
     await loadEntries();
   } catch (e) {
     alert(e?.message || 'Failed to publish all entries');
@@ -387,9 +453,9 @@ async function onDelete(e) {
   if (!confirm('Delete this entry permanently?')) return;
   try {
     deletingId.value = e._id;
-    await api.deleteEntry(e._id); // see API helper below
+    await api.deleteEntry(e._id);
     // Optimistic remove or reload:
-    entries.value = entries.value.filter(x => x._id !== e._id);
+    entries.value = entries.value.filter((x) => x._id !== e._id);
   } catch (err) {
     alert(err?.message || 'Failed to delete entry');
   } finally {
@@ -423,10 +489,32 @@ function entrySavedResult(e) {
   return Number.isFinite(r) ? r : null;
 }
 function entryTotals(text) {
-  const s  = breakdownByMap(text, SYSTEMS.simple.map,  SYSTEMS.simple.filter).total;
+  const s = breakdownByMap(text, SYSTEMS.simple.map, SYSTEMS.simple.filter).total;
   const en = breakdownByMap(text, SYSTEMS.english.map, SYSTEMS.english.filter).total;
-  const he = breakdownByMap(text, SYSTEMS.hebrew.map,  SYSTEMS.hebrew.filter).total;
+  const he = breakdownByMap(text, SYSTEMS.hebrew.map, SYSTEMS.hebrew.filter).total;
   return { simple: s, english: en, hebrew: he };
+}
+
+// ---------- BULK SUBMIT TO MASTER ----------
+async function submitAllToMaster() {
+  if (
+    !confirm('Submit ALL of your entries to the Master List for review?')
+  )
+    return;
+  submittingAll.value = true;
+  try {
+    const res = await api.submitAllToMaster(); // new API helper
+    alert(
+      `Submitted ${res?.updated || 0} entries to the Master List` +
+        (res?.skipped ? `, skipped ${res.skipped}` : '') +
+        '.'
+    );
+    await loadEntries(); // refresh statuses
+  } catch (e) {
+    alert(e?.message || 'Failed to submit all entries to Master List');
+  } finally {
+    submittingAll.value = false;
+  }
 }
 
 // ---------- GEMATRIAS ----------
@@ -434,7 +522,8 @@ const gLoading = ref(true);
 const gError = ref('');
 
 async function loadGematrias() {
-  gLoading.value = true; gError.value = '';
+  gLoading.value = true;
+  gError.value = '';
   try {
     gematrias.value = await api.getGematrias();
     // initialize custom toggles keyed by normalized id
@@ -458,14 +547,16 @@ function selectGematria(id) {
 }
 
 // ---------- CREATE GEMATRIA ----------
-const vals = reactive(Object.fromEntries(letters.map(l => [l, 0])));
+const vals = reactive(Object.fromEntries(letters.map((l) => [l, 0])));
 const gemName = ref('');
 const creatingGem = ref(false);
 const gemError = ref('');
 const gemOk = ref(false);
 
 async function createGem() {
-  creatingGem.value = true; gemError.value = ''; gemOk.value = false;
+  creatingGem.value = true;
+  gemError.value = '';
+  gemOk.value = false;
   try {
     const payload = { name: gemName.value, letters: { ...vals } };
     const created = await api.createGematria(payload);
@@ -475,7 +566,9 @@ async function createGem() {
     if (created && (created._id || created.id)) {
       gematriaId.value = idFor(created);
     } else {
-      const match = gematrias.value.find(g => (g?.name || '') === gemName.value);
+      const match = gematrias.value.find(
+        (g) => (g?.name || '') === gemName.value
+      );
       if (match) gematriaId.value = idFor(match);
     }
 
@@ -492,6 +585,7 @@ onMounted(async () => {
   await Promise.all([loadEntries(), loadGematrias()]);
 });
 </script>
+
 
 
 
