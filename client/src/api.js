@@ -142,6 +142,16 @@ export async function ensurePaidOrAdminClient(toPath = '/checkout') {
   return me;
 }
 
+// ---------- Convenience: buildUrl for components that need it ----------
+export function buildUrl(path, params) {
+  return BASE + path + toQS(params);
+}
+
+export const approvedMasterXlsxUrl = buildUrl('/api/master/approved.xlsx');
+export function reviewMasterXlsxUrl(status = 'all') {
+  return buildUrl('/api/master/export.xlsx', { status });
+}
+
 // ---------- High-level API ----------
 const api = {
   // axios-like
@@ -191,8 +201,14 @@ const api = {
   publishAllEntries: () =>
     request('/api/entries/publish-all', { method: 'POST' }),
 
-  // Public search (no auth)
-  searchPublic: (params) => request(`/api/search${toQS(params)}`),
+  // Public search (no auth) — NEW public entries endpoint
+  // Used by Home.vue (passes { page, limit, q, value, systems })
+  searchPublic: (params) =>
+    request('/api/public/entries', { params }),
+
+  // Legacy public search (if you still need /api/search anywhere else)
+  legacySearchPublic: (params) =>
+    request(`/api/search${toQS(params)}`),
 
   // Checkout (auth required but not paywalled)
   createCheckoutSession: () =>
@@ -200,7 +216,7 @@ const api = {
 
   // ---------- Master List / Review ----------
 
-   // Bulk submit ALL of the current user's entries to Master List
+  // Bulk submit ALL of the current user's entries to Master List
   submitAllToMaster,
 
   // Submit a single entry to Master List for review
@@ -238,11 +254,6 @@ export const {
   googleAuthUrl,
   facebookAuthUrl,
 } = api;
-
-// ---------- Convenience: buildUrl for components that need it ----------
-export function buildUrl(path, params) {
-  return BASE + path + toQS(params);
-}
 
 
 

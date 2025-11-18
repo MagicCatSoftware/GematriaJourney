@@ -1,13 +1,21 @@
 <template>
   <section class="card hero">
     <h1>Explore public entries & calculate live</h1>
-    <p class="muted">Enter a number or phrase to browse public entries. Use the calculator to see Simple, English, and Hebrew values as you type.</p>
+    <p class="muted">
+      Enter a number or phrase to browse public entries. Use the calculator to see Simple, English, and Hebrew values as you type.
+    </p>
 
     <!-- Calculator -->
     <div class="calc">
       <div class="field">
         <label>Calculator phrase</label>
-        <input v-model="calcPhrase" class="input" placeholder="Type a phrase…" autocomplete="off" spellcheck="false" />
+        <input
+          v-model="calcPhrase"
+          class="input"
+          placeholder="Type a phrase…"
+          autocomplete="off"
+          spellcheck="false"
+        />
       </div>
 
       <div class="calc-grid">
@@ -21,7 +29,9 @@
             {{ show.simple ? 'Hide' : 'Show' }} breakdown
           </button>
           <ul v-if="show.simple" class="list">
-            <li v-for="(it, i) in simple.items" :key="'s'+i"><code>{{ it[0] }}</code> = <b>{{ it[1] }}</b></li>
+            <li v-for="(it, i) in simple.items" :key="'s' + i">
+              <code>{{ it[0] }}</code> = <b>{{ it[1] }}</b>
+            </li>
           </ul>
         </div>
 
@@ -35,7 +45,9 @@
             {{ show.english ? 'Hide' : 'Show' }} breakdown
           </button>
           <ul v-if="show.english" class="list">
-            <li v-for="(it, i) in english.items" :key="'e'+i"><code>{{ it[0] }}</code> = <b>{{ it[1] }}</b></li>
+            <li v-for="(it, i) in english.items" :key="'e' + i">
+              <code>{{ it[0] }}</code> = <b>{{ it[1] }}</b>
+            </li>
           </ul>
         </div>
 
@@ -49,7 +61,9 @@
             {{ show.hebrew ? 'Hide' : 'Show' }} breakdown
           </button>
           <ul v-if="show.hebrew" class="list">
-            <li v-for="(it, i) in hebrew.items" :key="'h'+i"><code>{{ it[0] }}</code> = <b>{{ it[1] }}</b></li>
+            <li v-for="(it, i) in hebrew.items" :key="'h' + i">
+              <code>{{ it[0] }}</code> = <b>{{ it[1] }}</b>
+            </li>
           </ul>
         </div>
       </div>
@@ -76,11 +90,22 @@
         <div class="field-inline systems">
           <label>Match systems</label>
           <div class="chips">
-            <label class="chip"><input type="checkbox" v-model="sys.simple" @change="goPage(1)" /> Simple</label>
-            <label class="chip"><input type="checkbox" v-model="sys.english" @change="goPage(1)" /> English</label>
-            <label class="chip"><input type="checkbox" v-model="sys.hebrew" @change="goPage(1)" /> Hebrew</label>
+            <label class="chip">
+              <input type="checkbox" v-model="sys.simple" @change="goPage(1)" />
+              Simple
+            </label>
+            <label class="chip">
+              <input type="checkbox" v-model="sys.english" @change="goPage(1)" />
+              English
+            </label>
+            <label class="chip">
+              <input type="checkbox" v-model="sys.hebrew" @change="goPage(1)" />
+              Hebrew
+            </label>
           </div>
-          <div class="hint small">If a number is set, entries match when the phrase equals that number in any selected system.</div>
+          <div class="hint small">
+            If a number is set, entries match when the phrase equals that number in any selected system.
+          </div>
         </div>
 
         <div class="field-inline grow">
@@ -134,7 +159,7 @@
           <tbody>
             <tr v-for="r in renderRows" :key="r._id || r.id">
               <td class="phrase">"{{ safePhrase(r) }}"</td>
-              <td class="num">{{ r && typeof r.result === 'number' ? r.result : '' }}</td>
+              <td class="num">{{ entryResult(r) }}</td>
               <td class="num">{{ calcSimple(safePhrase(r)) }}</td>
               <td class="num">{{ calcEnglish(safePhrase(r)) }}</td>
               <td class="num">{{ calcHebrew(safePhrase(r)) }}</td>
@@ -155,9 +180,11 @@
       </div>
 
       <div class="pagination" v-if="pages > 1 || canPrev || canNext">
-        <button class="btn small ghost" :disabled="!canPrev" @click="goPage(page-1)">Prev</button>
-        <span class="muted">Page {{ page }} <span v-if="pages">of {{ pages }}</span></span>
-        <button class="btn small ghost" :disabled="!canNext" @click="goPage(page+1)">Next</button>
+        <button class="btn small ghost" :disabled="!canPrev" @click="goPage(page - 1)">Prev</button>
+        <span class="muted">
+          Page {{ page }} <span v-if="pages">of {{ pages }}</span>
+        </span>
+        <button class="btn small ghost" :disabled="!canNext" @click="goPage(page + 1)">Next</button>
       </div>
     </div>
   </section>
@@ -174,9 +201,15 @@ const calcPhrase = ref('');
 const show = reactive({ simple: false, english: false, hebrew: false });
 const toggle = (k) => (show[k] = !show[k]);
 
-const simple  = computed(() => breakdownByMap(calcPhrase.value, SYSTEMS.simple.map,  SYSTEMS.simple.filter));
-const english = computed(() => breakdownByMap(calcPhrase.value, SYSTEMS.english.map, SYSTEMS.english.filter));
-const hebrew  = computed(() => breakdownByMap(calcPhrase.value, SYSTEMS.hebrew.map,  SYSTEMS.hebrew.filter));
+const simple = computed(() =>
+  breakdownByMap(calcPhrase.value, SYSTEMS.simple.map, SYSTEMS.simple.filter)
+);
+const english = computed(() =>
+  breakdownByMap(calcPhrase.value, SYSTEMS.english.map, SYSTEMS.english.filter)
+);
+const hebrew = computed(() =>
+  breakdownByMap(calcPhrase.value, SYSTEMS.hebrew.map, SYSTEMS.hebrew.filter)
+);
 
 /* ---------- Public search (value + phrase + systems) ---------- */
 const value = ref();
@@ -199,8 +232,29 @@ function ownerName(r) {
   const o = r && r.owner;
   return (o && (o.name || o.email)) || 'Anon';
 }
+
+// Phrase helper: supports both plain + decrypted shapes
 function safePhrase(r) {
-  return (r && typeof r.phrase === 'string') ? r.phrase : '';
+  if (!r) return '';
+  if (typeof r.phrase === 'string' && r.phrase.trim().length > 0) {
+    return r.phrase;
+  }
+  if (
+    r.decrypted &&
+    typeof r.decrypted.phrase === 'string' &&
+    r.decrypted.phrase.trim().length > 0
+  ) {
+    return r.decrypted.phrase;
+  }
+  return '';
+}
+
+// Result helper: supports both plain + decrypted shapes
+function entryResult(r) {
+  if (!r) return '';
+  if (typeof r.result === 'number') return r.result;
+  if (r.decrypted && typeof r.decrypted.result === 'number') return r.decrypted.result;
+  return '';
 }
 
 const pages = computed(() => {
@@ -208,16 +262,25 @@ const pages = computed(() => {
   return 0;
 });
 const canPrev = computed(() => page.value > 1);
-const canNext = computed(() => (total.value > 0 ? page.value < pages.value : rows.value.length === limit.value));
+const canNext = computed(() =>
+  total.value > 0 ? page.value < pages.value : rows.value.length === limit.value
+);
 
 function formatDate(dt) {
-  try { return new Date(dt).toLocaleString(); } catch { return '—'; }
+  try {
+    return new Date(dt).toLocaleString();
+  } catch {
+    return '—';
+  }
 }
 
 /* Client-side calculators (for row columns and fallback filtering) */
-const calcSimple = (phrase) => sumByMap(phrase || '', SYSTEMS.simple.map, SYSTEMS.simple.filter);
-const calcEnglish = (phrase) => sumByMap(phrase || '', SYSTEMS.english.map, SYSTEMS.english.filter);
-const calcHebrew  = (phrase) => sumByMap(phrase || '', SYSTEMS.hebrew.map,  SYSTEMS.hebrew.filter);
+const calcSimple = (phrase) =>
+  sumByMap(phrase || '', SYSTEMS.simple.map, SYSTEMS.simple.filter);
+const calcEnglish = (phrase) =>
+  sumByMap(phrase || '', SYSTEMS.english.map, SYSTEMS.english.filter);
+const calcHebrew = (phrase) =>
+  sumByMap(phrase || '', SYSTEMS.hebrew.map, SYSTEMS.hebrew.filter);
 
 function selectedSystemIds() {
   const list = [];
@@ -227,12 +290,13 @@ function selectedSystemIds() {
   return list;
 }
 
-function matchesSelectedSystems(phrase, target) {
+function matchesSelectedSystems(row, target) {
   if (target == null || Number.isNaN(target)) return true; // no numeric filter
+  const phrase = safePhrase(row);
   const want = new Set(selectedSystemIds());
   if (want.has('simple') && calcSimple(phrase) === target) return true;
   if (want.has('english') && calcEnglish(phrase) === target) return true;
-  if (want.has('hebrew')  && calcHebrew(phrase)  === target) return true;
+  if (want.has('hebrew') && calcHebrew(phrase) === target) return true;
   return false;
 }
 
@@ -241,20 +305,17 @@ async function run() {
   error.value = '';
 
   try {
-    // build query params
     const params = { page: page.value, limit: limit.value };
 
     if (typeof value.value === 'number' && !Number.isNaN(value.value)) {
-      params.value = value.value; // change to params.result if your API expects "result"
-      const systems = selectedSystemIds();
-      params.systems = systems;   // okay if server ignores
+      params.value = value.value;
+      params.systems = selectedSystemIds();
     }
 
     if (q.value && q.value.trim()) {
-      params.q = q.value.trim();  // change to params.phrase if your API expects "phrase"
+      params.q = q.value.trim();
     }
 
-    // fetch
     const res = await api.searchPublic(params);
 
     // normalize & sanitize
@@ -269,9 +330,14 @@ async function run() {
       total.value = 0;
     }
 
-    // client-side fallback filter for systems+value if backend doesn't support it
+    // Just in case, do a client-side filter by systems + value
     if (typeof value.value === 'number' && !Number.isNaN(value.value)) {
-      rows.value = rows.value.filter(r => r && matchesSelectedSystems(r.phrase, value.value));
+      rows.value = rows.value.filter((r) => r && matchesSelectedSystems(r, value.value));
+    }
+
+    // Debug: log first row so you can see actual shape
+    if (rows.value.length) {
+      
     }
   } catch (e) {
     error.value = e?.message || 'Search failed';

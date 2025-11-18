@@ -9,6 +9,7 @@ import cookieParser from 'cookie-parser';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import XLSX from 'xlsx';
 import multer from 'multer';
 
 import { authRequired } from './middleware/auth.js';
@@ -94,6 +95,46 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     res.status(400).send(`Webhook Error: ${err.message}`);
   }
 });
+
+// ---------- Simple rate limiter for /api/public/entries (10 requests/min per IP) ----------
+// ---------- Rate limit: create entries (max 10 per minute per user) ----------
+const createEntryBuckets = new Map();
+const CREATE_WINDOW_MS   = 60 * 1000; // 1 minute
+const CREATE_MAX_PER_WIN = 10;
+
+function rateLimitCreateEntry(req, res, next) {
+  try {
+    if (!req.user || !req.user._id) {
+      // should already be guarded by requirePaidOrAdmin, but be safe
+      return res.status(401).json({ error: 'unauthenticated' });
+    }
+
+    const key = String(req.user._id);
+    const now = Date.now();
+    let bucket = createEntryBuckets.get(key);
+
+    // New window if none exists or window expired
+    if (!bucket || now - bucket.start > CREATE_WINDOW_MS) {
+      bucket = { start: now, count: 0 };
+    }
+
+    if (bucket.count >= CREATE_MAX_PER_WIN) {
+      return res.status(429).json({
+        error: 'rate_limited',
+        message:
+          'Rate limit reached: you can only create up to 10 entries per minute. Please wait a moment and try again.',
+      });
+    }
+
+    bucket.count += 1;
+    createEntryBuckets.set(key, bucket);
+    next();
+  } catch (err) {
+    console.warn('rateLimitCreateEntry error:', err.message);
+    // fail open rather than breaking entry creation
+    next();
+  }
+}
 
 // Normal middleware AFTER webhook raw body
 app.use(express.json());
@@ -391,51 +432,57 @@ app.get('/api/gematrias', async (req, res) => {
 });
 
 // ---------- Entry create / list (private-encrypted or public) ----------
-app.post('/api/entries', requirePaidOrAdmin, async (req, res) => {
-  const { gematriaId, phrase, visibility = 'private' } = req.body;
-  try {
-    const gem = await Gematria.findById(gematriaId);
-    if (!gem) return res.status(400).json({ error: 'invalid gematria' });
+app.post(
+  '/api/entries',
+  requirePaidOrAdmin,
+  rateLimitCreateEntry,   // <--- NEW
+  async (req, res) => {
+    const { gematriaId, phrase, visibility = 'private' } = req.body;
+    try {
+      const gem = await Gematria.findById(gematriaId);
+      if (!gem) return res.status(400).json({ error: 'invalid gematria' });
 
-    const normalized = (phrase || '')
-      .toLowerCase()
-      .replace(/[^a-z]/g, '');
-    let total = 0;
-    for (const ch of normalized) total += gem[ch] || 0;
+      const normalized = (phrase || '')
+        .toLowerCase()
+        .replace(/[^a-z]/g, '');
+      let total = 0;
+      for (const ch of normalized) total += gem[ch] || 0;
 
-    if (visibility === 'public') {
-      const e = await Entry.create({
-        owner: req.user._id,
-        gematria: gem._id,
-        phrase,
-        result: total,
-        visibility: 'public',
-      });
-      return res.json(e);
-    } else {
-      const userKeyBuffer = decryptUserKeyWithMaster(
-        MASTER_KEY,
-        req.user.encryptedUserKey
-      );
-      const payload = JSON.stringify({
-        phrase,
-        result: total,
-        createdAt: new Date().toISOString(),
-      });
-      const ciphertext = encryptWithKey(userKeyBuffer, payload);
-      const e = await Entry.create({
-        owner: req.user._id,
-        gematria: gem._id,
-        visibility: 'private',
-        ciphertext,
-      });
-      return res.json({ ok: true, id: e._id });
+      if (visibility === 'public') {
+        const e = await Entry.create({
+          owner: req.user._id,
+          gematria: gem._id,
+          phrase,
+          result: total,
+          visibility: 'public',
+        });
+        return res.json(e);
+      } else {
+        const userKeyBuffer = decryptUserKeyWithMaster(
+          MASTER_KEY,
+          req.user.encryptedUserKey
+        );
+        const payload = JSON.stringify({
+          phrase,
+          result: total,
+          createdAt: new Date().toISOString(),
+        });
+        const ciphertext = encryptWithKey(userKeyBuffer, payload);
+        const e = await Entry.create({
+          owner: req.user._id,
+          gematria: gem._id,
+          visibility: 'private',
+          ciphertext,
+        });
+        return res.json({ ok: true, id: e._id });
+      }
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: e.message });
     }
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: e.message });
   }
-});
+);
+
 
 app.get('/api/entries', requirePaidOrAdmin, async (req, res) => {
   try {
@@ -468,38 +515,80 @@ app.get('/api/entries', requirePaidOrAdmin, async (req, res) => {
   }
 });
 
-// Your entries (decrypt private)
+// Your entries (decrypt private/public if ciphertext exists, like master list)
 app.get('/api/my-entries', requirePaidOrAdmin, async (req, res) => {
   try {
-    const entries = await Entry.find({ owner: req.user._id })
-      .populate('gematria')
+    const docs = await Entry.find({ owner: req.user._id })
+      .populate('gematria', 'name')
+      .populate('owner', 'encryptedUserKey name email')
+      .sort({ createdAt: -1 })
       .lean();
-    const userKeyBuffer = decryptUserKeyWithMaster(
-      MASTER_KEY,
-      req.user.encryptedUserKey
-    );
 
-    const out = entries.map((ent) => {
-      if (ent.visibility === 'public') {
-        return {
-          ...ent,
-          decrypted: { phrase: ent.phrase, result: ent.result },
-        };
-      } else {
-        if (!ent.ciphertext) return { ...ent, decrypted: null };
+    const out = [];
+
+    for (const ent of docs) {
+      let phrase = null;
+      let result = null;
+
+      // 1) If we have ciphertext + owner key, try to decrypt (ANY visibility)
+      if (
+        ent.ciphertext &&
+        ent.owner?.encryptedUserKey &&
+        MASTER_KEY.length === 32
+      ) {
         try {
+          const userKeyBuffer = decryptUserKeyWithMaster(
+            MASTER_KEY,
+            ent.owner.encryptedUserKey
+          );
           const json = decryptWithKey(userKeyBuffer, ent.ciphertext);
-          return { ...ent, decrypted: JSON.parse(json) };
+          const payload = JSON.parse(json);
+
+          if (payload && typeof payload.phrase === 'string') {
+            phrase = payload.phrase;
+          }
+          if (payload && Number.isFinite(payload.result)) {
+            result = payload.result;
+          }
         } catch (err) {
-          return { ...ent, decrypted: null, _decryptError: true };
+          console.warn(
+            '[/api/my-entries] decrypt fail:',
+            ent._id,
+            err.message
+          );
         }
       }
-    });
+
+      // 2) Fallback to stored plain fields if needed
+      if (
+        (!phrase || !phrase.trim()) &&
+        typeof ent.phrase === 'string' &&
+        ent.phrase.trim().length > 0
+      ) {
+        phrase = ent.phrase;
+      }
+      if (result === null && Number.isFinite(ent.result)) {
+        result = ent.result;
+      }
+
+      // 3) Push combined object; frontend uses decrypted.*
+      out.push({
+        ...ent,
+        decrypted: {
+          phrase: phrase || '',
+          result,
+        },
+      });
+    }
+
     res.json(out);
   } catch (e) {
+    console.error('[/api/my-entries] error:', e);
     res.status(500).json({ error: e.message });
   }
 });
+
+
 
 // Toggle visibility publish/private
 app.patch('/api/entries/:id/visibility', requirePaidOrAdmin, async (req, res) => {
@@ -595,45 +684,64 @@ app.get('/api/search', async (req, res) => {
  * GET /api/public/entries
  * ?page=1&limit=25&value=198&systems[]=simple&systems[]=english&systems[]=hebrew&q=truth
  */
+// ---------- Public search (value + phrase + systems + pagination) ----------
+/**
+ * GET /api/public/entries
+ * ?page=1&limit=25&value=198&systems[]=simple&systems[]=english&systems[]=hebrew&q=truth
+ */
+// ---------- Public search (value + phrase + systems + pagination + sorting) ----------
+/**
+ * GET /api/public/entries
+ * ?page=1&limit=50&value=198&systems[]=simple&systems[]=english&systems[]=hebrew&q=truth&sort=createdAt&dir=desc
+ */
 app.get('/api/public/entries', async (req, res) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page || '1', 10));
-    const limit = Math.max(
-      1,
-      Math.min(100, parseInt(req.query.limit || '25', 10))
-    );
-    const qStr = (req.query.q || '').toString().trim();
-    const value =
-      req.query.value != null ? Number(req.query.value) : null;
+    const page  = Math.max(1, parseInt(req.query.page || '1', 10));
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit || '25', 10)));
+
+    const qStr    = (req.query.q || '').toString().trim();
+    const value   = req.query.value != null ? Number(req.query.value) : null;
     const systems = Array.isArray(req.query.systems)
       ? req.query.systems
       : req.query.systems
       ? [req.query.systems]
       : ['simple', 'english', 'hebrew'];
 
+    // ---- Sorting ----
+    const sortParam  = (req.query.sort || 'createdAt').toString();
+    const dirParam   = (req.query.dir  || 'desc').toString().toLowerCase();
+    const allowedMap = {
+      createdAt: 'createdAt',
+      result:    'result',
+      phrase:    'phrase',
+    };
+    const sortField = allowedMap[sortParam] || 'createdAt';
+    const sortDir   = dirParam === 'asc' ? 1 : -1;
+
+    // Only public entries
     const findQ = { visibility: 'public' };
-    if (qStr) findQ.phrase = { $regex: qStr, $options: 'i' };
+    if (qStr) {
+      // We'll phrase-filter again after decrypting, but this helps a bit
+      findQ.phrase = { $regex: qStr, $options: 'i' };
+    }
 
-    const cursor = Entry.find(findQ)
-      .populate('gematria owner', 'name email')
-      .sort({ createdAt: -1 });
-
+    // Count with the same basic filter (public + phrase)
     const total = await Entry.countDocuments(findQ);
-    const docs = await cursor.skip((page - 1) * limit).limit(limit).lean();
 
+    // IMPORTANT: we must populate owner.encryptedUserKey to decrypt
+    const rawDocs = await Entry.find(findQ)
+      .populate('gematria', 'name')
+      .populate('owner', 'name email encryptedUserKey')
+      .sort({ [sortField]: sortDir })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+
+    // ---- Built-in maps for numeric filter ----
+    const A_Z = 'abcdefghijklmnopqrstuvwxyz'.split('');
     const MAPS = {
-      simple: Object.fromEntries(
-        Array.from({ length: 26 }, (_, i) => [
-          String.fromCharCode(97 + i),
-          i + 1,
-        ])
-      ),
-      english: Object.fromEntries(
-        Array.from({ length: 26 }, (_, i) => [
-          String.fromCharCode(97 + i),
-          (i + 1) * 6,
-        ])
-      ),
+      simple: Object.fromEntries(A_Z.map((c, i) => [c, i + 1])),
+      english: Object.fromEntries(A_Z.map((c, i) => [c, (i + 1) * 6])),
       hebrew: {
         a: 1,
         b: 2,
@@ -668,35 +776,99 @@ app.get('/api/public/entries', async (req, res) => {
     const sumBy = (str, map) => {
       if (!str) return 0;
       let t = 0;
-      for (const ch of str.toLowerCase()) {
+      const s = String(str).toLowerCase();
+      for (const ch of s) {
         if (!REG.test(ch)) continue;
         if (map[ch]) t += map[ch];
       }
       return t;
     };
 
-    const wantValue = value != null && !Number.isNaN(value);
+    const wantValue   = value != null && !Number.isNaN(value);
     const wantSystems = new Set(
-      systems.length ? systems : ['simple', 'english', 'hebrew']
+      systems && systems.length ? systems : ['simple', 'english', 'hebrew']
     );
 
-    const items = docs.filter((d) => {
+    // ---- Normalize each entry: ensure phrase/result exist; decrypt if needed ----
+    const normalized = [];
+
+    for (const ent of rawDocs) {
+      let phrase =
+        typeof ent.phrase === 'string' && ent.phrase.trim().length > 0
+          ? ent.phrase
+          : null;
+      let result = Number.isFinite(ent.result) ? ent.result : null;
+
+      // If we don't have phrase/result but we DO have ciphertext + user key, decrypt
+      if ((!phrase || result === null) && ent.ciphertext && ent.owner?.encryptedUserKey) {
+        try {
+          const userKeyBuffer = decryptUserKeyWithMaster(
+            MASTER_KEY,
+            ent.owner.encryptedUserKey
+          );
+          const json    = decryptWithKey(userKeyBuffer, ent.ciphertext);
+          const payload = JSON.parse(json);
+
+          if (!phrase && payload && typeof payload.phrase === 'string') {
+            phrase = payload.phrase;
+          }
+          if (result === null && payload && Number.isFinite(payload.result)) {
+            result = payload.result;
+          }
+        } catch (err) {
+          console.warn('public decrypt fail', ent._id, err.message);
+        }
+      }
+
+      normalized.push({
+        _id: ent._id,
+        createdAt: ent.createdAt,
+        visibility: ent.visibility,
+        master: ent.master,
+        // what the frontend actually uses:
+        phrase: phrase || '',
+        result: Number.isFinite(result) ? result : null,
+        gematria: ent.gematria || null,
+        owner: ent.owner
+          ? {
+              _id:   ent.owner._id,
+              name:  ent.owner.name,
+              email: ent.owner.email,
+            }
+          : null,
+      });
+    }
+
+    // ---- Optional phrase filter AFTER decryption (in case original findQ missed some) ----
+    const phraseFiltered = qStr
+      ? normalized.filter((d) =>
+          (d.phrase || '').toLowerCase().includes(qStr.toLowerCase())
+        )
+      : normalized;
+
+    // ---- Apply numeric/system filter if a value is provided ----
+    const items = phraseFiltered.filter((d) => {
       if (!wantValue) return true;
-      const s = sumBy(d.phrase, MAPS.simple);
-      const e = sumBy(d.phrase, MAPS.english);
-      const h = sumBy(d.phrase, MAPS.hebrew);
-      if (wantSystems.has('simple') && s === value) return true;
+
+      const phrase = d.phrase || '';
+      const s = sumBy(phrase, MAPS.simple);
+      const e = sumBy(phrase, MAPS.english);
+      const h = sumBy(phrase, MAPS.hebrew);
+
+      if (wantSystems.has('simple')  && s === value) return true;
       if (wantSystems.has('english') && e === value) return true;
-      if (wantSystems.has('hebrew') && h === value) return true;
+      if (wantSystems.has('hebrew')  && h === value) return true;
       return false;
     });
 
     res.json({ items, total });
   } catch (e) {
-    console.error(e);
+    console.error('GET /api/public/entries error', e);
     res.status(500).json({ error: e.message });
   }
 });
+
+
 
 // ---------- Delete entry ----------
 app.delete('/api/entries/:id', requirePaidOrAdmin, async (req, res) => {
@@ -772,6 +944,123 @@ app.post('/api/entries/publish-all', requirePaidOrAdmin, async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+
+// ===== Excel export helpers =====
+const A_Z = 'abcdefghijklmnopqrstuvwxyz'.split('');
+const MAPS_EXPORT = {
+  simple:  Object.fromEntries(A_Z.map((c, i) => [c, i + 1])),
+  english: Object.fromEntries(A_Z.map((c, i) => [c, (i + 1) * 6])),
+  // Hebrew: A=1..Z=900 (26 letters)
+  hebrew:  Object.fromEntries(A_Z.map((c, i) => [c, (i + 1) * (i < 9 ? 1 : i < 18 ? 10 : 100)])),
+};
+// fix exact 1..900 sequence (optional clarity)
+MAPS_EXPORT.hebrew.a=1; MAPS_EXPORT.hebrew.b=2; MAPS_EXPORT.hebrew.c=3; MAPS_EXPORT.hebrew.d=4; MAPS_EXPORT.hebrew.e=5; MAPS_EXPORT.hebrew.f=6; MAPS_EXPORT.hebrew.g=7; MAPS_EXPORT.hebrew.h=8; MAPS_EXPORT.hebrew.i=9;
+MAPS_EXPORT.hebrew.j=10; MAPS_EXPORT.hebrew.k=20; MAPS_EXPORT.hebrew.l=30; MAPS_EXPORT.hebrew.m=40; MAPS_EXPORT.hebrew.n=50; MAPS_EXPORT.hebrew.o=60; MAPS_EXPORT.hebrew.p=70; MAPS_EXPORT.hebrew.q=80; MAPS_EXPORT.hebrew.r=90;
+MAPS_EXPORT.hebrew.s=100; MAPS_EXPORT.hebrew.t=200; MAPS_EXPORT.hebrew.u=300; MAPS_EXPORT.hebrew.v=400; MAPS_EXPORT.hebrew.w=500; MAPS_EXPORT.hebrew.x=600; MAPS_EXPORT.hebrew.y=700; MAPS_EXPORT.hebrew.z=900;
+
+function builtinTotalsForExport(text = '') {
+  const chars = (text || '').toLowerCase().match(/[a-z]/g) || [];
+  const sum = (map) => chars.reduce((t, ch) => t + (map[ch] || 0), 0);
+  return {
+    simple:  sum(MAPS_EXPORT.simple),
+    english: sum(MAPS_EXPORT.english),
+    hebrew:  sum(MAPS_EXPORT.hebrew),
+  };
+}
+
+function pickPhraseAndResultForExport(ent) {
+  // prefer decrypted payload if present (mirrors your /api/master handlers)
+  const phrase =
+    (ent?.decrypted && typeof ent.decrypted.phrase === 'string' && ent.decrypted.phrase) ||
+    (typeof ent?.phrase === 'string' ? ent.phrase : '');
+  const result =
+    (Number.isFinite(ent?.decrypted?.result) ? ent.decrypted.result : null) ??
+    (Number.isFinite(ent?.result) ? ent.result : null);
+  return { phrase, result };
+}
+
+function rowsFromEntriesForExport(entries, { includeStatus = false } = {}) {
+  const header = [
+    'Date',
+    'Gematria',
+    'Phrase',
+    'System Result',
+    'Simple',
+    'English',
+    'Hebrew',
+  ];
+  if (includeStatus) header.push('Status', 'Visibility');
+
+  const rows = [header];
+
+  for (const ent of entries) {
+    const date = new Date(ent?.master?.submittedAt || ent?.createdAt || Date.now()).toLocaleString();
+    const gem = ent?.gematria?.name || '';
+    const { phrase, result } = pickPhraseAndResultForExport(ent);
+    const totals = builtinTotalsForExport(phrase);
+
+    const row = [
+      date,
+      gem,
+      phrase,
+      Number.isFinite(result) ? result : '',
+      totals.simple,
+      totals.english,
+      totals.hebrew,
+    ];
+    if (includeStatus) row.push(ent?.master?.status || '', ent?.visibility || '');
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function sendWorkbook(res, rows, filename) {
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Master');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  return res.send(buf);
+}
+
+// Re-usable fetch+decrypt for export (approved or admin list)
+async function fetchAndDecryptForExport(findQuery) {
+  const docs = await Entry.find(findQuery)
+    .populate('gematria', 'name')
+    .populate('owner', 'encryptedUserKey')
+    .sort({ 'master.submittedAt': 1, createdAt: 1 })
+    .lean();
+
+  const out = [];
+  for (const ent of docs) {
+    let phrase = null;
+    let result = null;
+
+    if (ent.ciphertext && ent.owner?.encryptedUserKey) {
+      try {
+        const userKeyBuffer = decryptUserKeyWithMaster(MASTER_KEY, ent.owner.encryptedUserKey);
+        const json = decryptWithKey(userKeyBuffer, ent.ciphertext);
+        const payload = JSON.parse(json);
+        if (payload && typeof payload.phrase === 'string') phrase = payload.phrase;
+        if (payload && Number.isFinite(payload.result)) result = payload.result;
+      } catch (err) {
+        console.warn('export decrypt fail', ent._id, err.message);
+      }
+    }
+    if (!phrase && typeof ent.phrase === 'string' && ent.phrase.trim()) phrase = ent.phrase;
+    if (result === null && Number.isFinite(ent.result)) result = ent.result;
+
+    out.push({
+      ...ent,
+      decrypted: { phrase: phrase || '', result },
+    });
+  }
+  return out;
+}
+
 
 // ---------- Master List routes ----------
 // Bulk submit ALL of the current user's entries to Master List (requires paid/admin)
@@ -926,6 +1215,7 @@ app.get('/api/master/approved', async (req, res) => {
 // GET /api/master
 // - Public / non-auth: only approved + public entries
 // - Admin: all entries that have a master.status
+// Admin: full master review list (pending/approved/rejected) with decrypted payload
 app.get('/api/master', requireAdmin, async (req, res) => {
   try {
     const docs = await Entry.find({
@@ -934,7 +1224,6 @@ app.get('/api/master', requireAdmin, async (req, res) => {
       .populate('gematria', 'name')
       .populate('owner', 'encryptedUserKey') // needed for decryption
       .sort({ 'master.submittedAt': 1, createdAt: 1 }) // oldest → newest
-      .select('phrase result visibility gematria master createdAt ciphertext owner')
       .lean();
 
     const out = [];
@@ -943,7 +1232,7 @@ app.get('/api/master', requireAdmin, async (req, res) => {
       let phrase = null;
       let result = null;
 
-      // 1) FIRST: try to decrypt, regardless of visibility
+      // 1) Try to decrypt if we have ciphertext + user key
       if (ent.ciphertext && ent.owner?.encryptedUserKey) {
         try {
           const userKeyBuffer = decryptUserKeyWithMaster(
@@ -968,7 +1257,7 @@ app.get('/api/master', requireAdmin, async (req, res) => {
         }
       }
 
-      // 2) FALLBACK: use stored fields if we still don't have data
+      // 2) Fallback to stored plain fields if decryption didn’t give us anything
       if (!phrase && typeof ent.phrase === 'string' && ent.phrase.trim().length > 0) {
         phrase = ent.phrase;
       }
@@ -976,19 +1265,9 @@ app.get('/api/master', requireAdmin, async (req, res) => {
         result = ent.result;
       }
 
-      // 3) Build response object (shape matches /api/master/approved)
+      // 3) Push combined object. Frontend uses `decrypted.phrase` / `decrypted.result`.
       out.push({
-        _id: ent._id,
-        gematria: ent.gematria,
-        master: ent.master,
-        createdAt: ent.createdAt,
-        visibility: ent.visibility,
-
-        // keep raw fields (may be null)
-        phrase: ent.phrase ?? null,
-        result: Number.isFinite(ent.result) ? ent.result : null,
-
-        // what the frontend actually uses:
+        ...ent,
         decrypted: {
           phrase: phrase || '',
           result: result,
@@ -1002,6 +1281,7 @@ app.get('/api/master', requireAdmin, async (req, res) => {
     res.status(500).json({ error: err.message || 'master_list_failed' });
   }
 });
+
 
 // Admin: update master status (approved / rejected / pending / none)
 app.patch('/api/master/:id', requireAdmin, async (req, res) => {
@@ -1044,6 +1324,41 @@ app.patch('/api/master/:id', requireAdmin, async (req, res) => {
     res.status(500).json({ error: err.message || 'update_master_failed' });
   }
 });
+
+// ---------- Master List: Excel exports (in this file, no external router) ----------
+
+// Public export: Approved only
+app.get('/api/master/approved.xlsx', async (req, res) => {
+  try {
+    const entries = await fetchAndDecryptForExport({ 'master.status': 'approved' });
+    const rows = rowsFromEntriesForExport(entries, { includeStatus: false });
+    const fname = `master-approved-${new Date().toISOString().slice(0,10)}.xlsx`;
+    return sendWorkbook(res, rows, fname);
+  } catch (err) {
+    console.error('GET /api/master/approved.xlsx error:', err);
+    res.status(500).json({ error: err.message || 'export_failed' });
+  }
+});
+
+// Admin export: status filter (all | pending | approved | rejected)
+app.get('/api/master/export.xlsx', requireAdmin, async (req, res) => {
+  try {
+    const status = String(req.query.status || 'all').toLowerCase();
+    const allowed = ['pending', 'approved', 'rejected'];
+    const statusQuery = status === 'all'
+      ? { $in: allowed }
+      : (allowed.includes(status) ? status : { $in: allowed });
+
+    const entries = await fetchAndDecryptForExport({ 'master.status': statusQuery });
+    const rows = rowsFromEntriesForExport(entries, { includeStatus: true });
+    const fname = `master-${status}-${new Date().toISOString().slice(0,10)}.xlsx`;
+    return sendWorkbook(res, rows, fname);
+  } catch (err) {
+    console.error('GET /api/master/export.xlsx error:', err);
+    res.status(500).json({ error: err.message || 'export_failed' });
+  }
+});
+
 
 // ---------- Stripe checkout ----------
 app.post('/api/create-checkout-session', requireAuthOnly, async (req, res) => {

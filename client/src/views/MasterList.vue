@@ -36,6 +36,9 @@
           <span class="muted small">
             These entries have been approved and are visible publicly.
           </span>
+          <a :href="approvedXlsxHref" class="btn btn-download" download>
+  ⬇️ Download Full Master List (Excel)
+</a>
         </div>
 
         <div v-if="sortedApprovedEntries.length === 0" class="muted">
@@ -245,6 +248,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import api, { getMe } from '../api';
+import {buildUrl } from '../api'; // <-- add buildUrl
 import { SYSTEMS, breakdownByMap } from '../Gematria';
 
 const approvedEntries = ref([]);
@@ -254,6 +258,7 @@ const error = ref('');
 
 const me = ref(null);
 const isAdmin = computed(() => me.value?.role === 'admin');
+
 
 const statusFilter = ref('all');
 const updatingId = ref(null);
@@ -316,6 +321,13 @@ async function loadMaster() {
     loading.value = false;
   }
 }
+
+const approvedXlsxHref = computed(() => api.approvedMasterXlsxUrl ? api.approvedMasterXlsxUrl() : buildUrl('/api/master/approved.xlsx'));
+const reviewXlsxHref = computed(() =>
+  isAdmin.value
+    ? (api.reviewMasterXlsxUrl ? api.reviewMasterXlsxUrl(statusFilter.value) : buildUrl('/api/master/export.xlsx', { status: statusFilter.value }))
+    : '#'
+);
 
 // ---- Sorting Helpers ----
 function dateVal(entry) {
@@ -453,6 +465,34 @@ onMounted(async () => {
 
 
 <style scoped>
+
+.btn-download {
+  display: inline-block;
+  background: linear-gradient(135deg, #16a34a, #22c55e);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.05rem;
+  padding: 0.9rem 1.6rem;
+  border-radius: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 255, 100, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.btn-download:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(34, 197, 94, 0.45);
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+}
+
+.btn-download:active {
+  transform: translateY(1px);
+  box-shadow: 0 3px 8px rgba(34, 197, 94, 0.35);
+}
+
 .container {
   max-width: 100vw;
   overflow-x: hidden;

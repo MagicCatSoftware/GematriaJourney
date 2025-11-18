@@ -45,6 +45,7 @@ const error = ref('');
 onMounted(async () => {
   try {
     entries.value = await api.myEntries();
+    console.log(entries);
   } catch (e) {
     error.value = e.message;
   } finally {

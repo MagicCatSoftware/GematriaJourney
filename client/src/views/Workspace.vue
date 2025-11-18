@@ -172,62 +172,114 @@
       <div v-else>
         <div v-if="entries.length === 0" class="muted">No entries yet.</div>
 
-        <div class="entries-grid">
-          <article class="entry-card" v-for="e in entries" :key="e._id">
-            <header class="entry-head">
-              <div class="entry-title">
-                <strong class="gem-name">{{ e.gematria?.name || '—' }}</strong>
-                <span class="tag" :class="e.visibility">{{ e.visibility }}</span>
-              </div>
-              <time class="stamp">{{ new Date(e.createdAt).toLocaleString() }}</time>
-            </header>
+        <div v-else>
+          <div class="entries-grid">
+            <article class="entry-card" v-for="e in pagedEntries" :key="e._id">
+              <header class="entry-head">
+                <div class="entry-title">
+                  <strong class="gem-name">{{ e.gematria?.name || '—' }}</strong>
+                  <span class="tag" :class="e.visibility">{{ e.visibility }}</span>
+                </div>
+                <time class="stamp">{{ new Date(e.createdAt).toLocaleString() }}</time>
+              </header>
 
-            <div class="entry-body">
-              <div class="phrase">“{{ entryPhrase(e) || '—' }}”</div>
-              <div class="saved-result" v-if="entrySavedResult(e) !== null">
-                = <span class="saved-total">{{ entrySavedResult(e) }}</span>
+              <div class="entry-body">
+                <div class="phrase">“{{ entryPhrase(e) || '—' }}”</div>
+                <div class="saved-result" v-if="entrySavedResult(e) !== null">
+                  = <span class="saved-total">{{ entrySavedResult(e) }}</span>
+                </div>
+                <div v-else class="muted">Unable to decrypt.</div>
               </div>
-              <div v-else class="muted">Unable to decrypt.</div>
+
+              <!-- Built-in totals for the entry's phrase -->
+              <div v-if="entryPhrase(e)" class="tri">
+                <span class="pill">
+                  <b>Simple</b>
+                  <span class="mono">{{ entryTotals(entryPhrase(e)).simple }}</span>
+                </span>
+                <span class="pill">
+                  <b>English</b>
+                  <span class="mono">{{ entryTotals(entryPhrase(e)).english }}</span>
+                </span>
+                <span class="pill">
+                  <b>Hebrew</b>
+                  <span class="mono">{{ entryTotals(entryPhrase(e)).hebrew }}</span>
+                </span>
+              </div>
+
+              <footer class="entry-actions">
+                <button
+                  class="btn tiny"
+                  :disabled="togglingId === e._id"
+                  @click="togglePublish(e)"
+                  :title="e.visibility === 'public'
+                    ? 'Make Private (will encrypt)'
+                    : 'Publish (will decrypt & expose phrase/result)'"
+                >
+                  {{ e.visibility === 'public' ? 'Make Private' : 'Publish' }}
+                </button>
+
+                <button
+                  class="btn tiny"
+                  :disabled="deletingId === e._id"
+                  @click="onDelete(e)"
+                  title="Delete this entry"
+                >
+                  {{ deletingId === e._id ? 'Deleting…' : 'Delete' }}
+                </button>
+              </footer>
+            </article>
+          </div>
+
+          <!-- Pagination controls -->
+          <div
+            v-if="entries.length > pageSize"
+            class="pager"
+            style="display:flex;align-items:center;justify-content:space-between;margin-top:1rem;gap:.75rem;flex-wrap:wrap;"
+          >
+            <div class="muted small">
+              Showing
+              <strong>{{ startIndex + 1 }}</strong>–
+              <strong>{{ Math.min(endIndex, entries.length) }}</strong>
+              of
+              <strong>{{ entries.length }}</strong>
+              entries
             </div>
 
-            <!-- Built-in totals for the entry's phrase -->
-            <div v-if="entryPhrase(e)" class="tri">
-              <span class="pill">
-                <b>Simple</b>
-                <span class="mono">{{ entryTotals(entryPhrase(e)).simple }}</span>
+            <div style="display:flex;align-items:center;gap:.5rem;">
+              <button
+                class="btn small ghost"
+                type="button"
+                @click="prevPage"
+                :disabled="currentPage === 1"
+              >
+                ‹ Prev
+              </button>
+
+              <span class="muted small">
+                Page {{ currentPage }} of {{ totalPages }}
               </span>
-              <span class="pill">
-                <b>English</b>
-                <span class="mono">{{ entryTotals(entryPhrase(e)).english }}</span>
-              </span>
-              <span class="pill">
-                <b>Hebrew</b>
-                <span class="mono">{{ entryTotals(entryPhrase(e)).hebrew }}</span>
-              </span>
+
+              <button
+                class="btn small ghost"
+                type="button"
+                @click="nextPage"
+                :disabled="currentPage === totalPages"
+              >
+                Next ›
+              </button>
+
+              <select
+                class="input"
+                style="width:auto;"
+                v-model.number="pageSize"
+              >
+                <option :value="10">10 / page</option>
+                <option :value="25">25 / page</option>
+                <option :value="50">50 / page</option>
+              </select>
             </div>
-
-            <footer class="entry-actions">
-              <button
-                class="btn tiny"
-                :disabled="togglingId === e._id"
-                @click="togglePublish(e)"
-                :title="e.visibility === 'public'
-                  ? 'Make Private (will encrypt)'
-                  : 'Publish (will decrypt & expose phrase/result)'"
-              >
-                {{ e.visibility === 'public' ? 'Make Private' : 'Publish' }}
-              </button>
-
-              <button
-                class="btn tiny"
-                :disabled="deletingId === e._id"
-                @click="onDelete(e)"
-                title="Delete this entry"
-              >
-                {{ deletingId === e._id ? 'Deleting…' : 'Delete' }}
-              </button>
-            </footer>
-          </article>
+          </div>
         </div>
       </div>
     </section>
@@ -286,7 +338,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref, reactive, computed } from 'vue';
+import { onMounted, ref, reactive, computed, watch } from 'vue';
 import api from '../api';
 import { SYSTEMS, breakdownByMap } from '../Gematria';
 
@@ -400,7 +452,11 @@ async function saveEntry() {
     entryOk.value = true;
     await loadEntries();
   } catch (e) {
-    entryError.value = e.message || 'Failed to save entry';
+    // If server used error "rate_limited", api.js will put that text in e.message
+    entryError.value =
+      e?.message?.includes('Rate limit reached')
+        ? e.message
+        : (e.message || 'Failed to save entry');
   } finally {
     savingEntry.value = false;
   }
@@ -411,11 +467,48 @@ const entries = ref([]);
 const entriesLoading = ref(true);
 const entriesError = ref('');
 
+// pagination state
+const pageSize = ref(25);
+const currentPage = ref(1);
+
+const totalPages = computed(() => {
+  const len = entries.value.length;
+  if (!len) return 1;
+  return Math.max(1, Math.ceil(len / pageSize.value));
+});
+
+const startIndex = computed(() => (currentPage.value - 1) * pageSize.value);
+const endIndex = computed(() => startIndex.value + pageSize.value);
+
+const pagedEntries = computed(() =>
+  entries.value.slice(startIndex.value, endIndex.value)
+);
+
+function goToPage(p) {
+  const max = totalPages.value || 1;
+  const next = Math.min(Math.max(1, p), max);
+  currentPage.value = next;
+}
+
+function nextPage() {
+  goToPage(currentPage.value + 1);
+}
+
+function prevPage() {
+  goToPage(currentPage.value - 1);
+}
+
+watch([entries, pageSize], () => {
+  const max = totalPages.value || 1;
+  if (currentPage.value > max) currentPage.value = max;
+});
+
 async function loadEntries() {
   entriesLoading.value = true;
   entriesError.value = '';
   try {
     entries.value = await api.myEntries();
+    currentPage.value = 1; // reset to first page on reload
   } catch (e) {
     entriesError.value = e.message || 'Failed to load entries';
   } finally {
@@ -454,7 +547,7 @@ async function onDelete(e) {
   try {
     deletingId.value = e._id;
     await api.deleteEntry(e._id);
-    // Optimistic remove or reload:
+    // Optimistic remove
     entries.value = entries.value.filter((x) => x._id !== e._id);
   } catch (err) {
     alert(err?.message || 'Failed to delete entry');
@@ -480,14 +573,39 @@ async function togglePublish(e) {
 
 // Helpers to render per-entry built-in totals
 function entryPhrase(e) {
-  if (e.visibility === 'public') return e.phrase || '';
-  return e?.decrypted?.phrase || '';
+  if (!e) return '';
+
+  // 1) Always prefer decrypted phrase (what /api/my-entries is giving you)
+  if (
+    e.decrypted &&
+    typeof e.decrypted.phrase === 'string' &&
+    e.decrypted.phrase.trim()
+  ) {
+    return e.decrypted.phrase;
+  }
+
+  // 2) Fallback to stored plaintext phrase (for older/public entries)
+  if (typeof e.phrase === 'string' && e.phrase.trim()) {
+    return e.phrase;
+  }
+
+  return '';
 }
+
 function entrySavedResult(e) {
-  if (e.visibility === 'public') return Number.isFinite(e.result) ? e.result : null;
-  const r = e?.decrypted?.result;
-  return Number.isFinite(r) ? r : null;
+  if (!e) return null;
+
+  // 1) Prefer decrypted.result
+  const dr = e.decrypted?.result;
+  if (Number.isFinite(dr)) return dr;
+
+  // 2) Fallback to stored result
+  if (Number.isFinite(e.result)) return e.result;
+
+  // Nothing usable – this is when "Unable to decrypt." shows
+  return null;
 }
+
 function entryTotals(text) {
   const s = breakdownByMap(text, SYSTEMS.simple.map, SYSTEMS.simple.filter).total;
   const en = breakdownByMap(text, SYSTEMS.english.map, SYSTEMS.english.filter).total;
@@ -497,10 +615,7 @@ function entryTotals(text) {
 
 // ---------- BULK SUBMIT TO MASTER ----------
 async function submitAllToMaster() {
-  if (
-    !confirm('Submit ALL of your entries to the Master List for review?')
-  )
-    return;
+  if (!confirm('Submit ALL of your entries to the Master List for review?')) return;
   submittingAll.value = true;
   try {
     const res = await api.submitAllToMaster(); // new API helper
@@ -585,6 +700,7 @@ onMounted(async () => {
   await Promise.all([loadEntries(), loadGematrias()]);
 });
 </script>
+
 
 
 

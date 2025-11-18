@@ -71,6 +71,7 @@ const router = createRouter({
 
     // 404 fallback
     { path: '/:pathMatch(.*)*', name: 'not-found', component: Home },
+    { path: '/search', name: 'search', component: PublicSearch },
   ],
 });
 
