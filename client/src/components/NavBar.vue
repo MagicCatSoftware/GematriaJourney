@@ -94,12 +94,6 @@ async function handleLogout() {
       <nav class="links">
         <router-link to="/">Home</router-link>
 
-        <!-- NEW: Public List (all public entries) -->
-        <router-link to="/search">Public List</router-link>
-
-        <!-- Master List is public curated/approved list -->
-        <router-link to="/master-list">Master List</router-link>
-
         <!-- show only when server says logged in AND not admin AND not lifetime -->
         <router-link
           v-if="isLoggedIn && !isAdmin && !isLifetime && !checking"

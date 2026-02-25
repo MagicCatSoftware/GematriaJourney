@@ -6,16 +6,11 @@ const Home           = () => import('./views/Home.vue');
 const Login          = () => import('./views/Login.vue');
 const AuthSuccess    = () => import('./views/AuthSuccess.vue');
 const CreateEntry    = () => import('./views/CreateEntry.vue');
-
-const PublicSearch   = () => import('./views/PublicSearch.vue');
 const Checkout       = () => import('./views/Checkout.vue');
 const Workspace      = () => import('./views/Workspace.vue');
 const MyProfile      = () => import('./views/MyProfile.vue');
 const Admin          = () => import('./views/Admin.vue');
 const PaymentSuccess = () => import('./views/PaymentSuccess.vue');
-
-// NEW: Master List view
-const MasterList     = () => import('./views/MasterList.vue');
 
 // Simple in-module cache
 let cachedMe = null;
@@ -52,9 +47,6 @@ const router = createRouter({
     { path: '/login',           name: 'login',           component: Login },
     { path: '/auth-success',    name: 'auth-success',    component: AuthSuccess },
 
-    // Public
-    { path: '/search',          name: 'search',          component: PublicSearch },
-
     // Authed but not paywalled
     { path: '/checkout',        name: 'checkout',        component: Checkout,        meta: { auth: true } },
     { path: '/payment-success', name: 'payment-success', component: PaymentSuccess,  meta: { auth: true } },
@@ -63,26 +55,21 @@ const router = createRouter({
     { path: '/workspace',       name: 'workspace',       component: Workspace,       meta: { auth: true, paid: true } },
     { path: '/my-profile',      name: 'my-profile',      component: MyProfile,       meta: { auth: true, paid: true } },
 
-    // NEW: Master List (paywalled like workspace)
-    { path: '/master-list',     name: 'master-list',     component: MasterList, },
-
     // Admin-only
     { path: '/admin',           name: 'admin',           component: Admin,           meta: { auth: true, role: 'admin' } },
 
     // 404 fallback
     { path: '/:pathMatch(.*)*', name: 'not-found', component: Home },
-    { path: '/search', name: 'search', component: PublicSearch },
   ],
 });
 
-// ---- New: unpaid redirect policy ----
+// ---- unpaid redirect policy ----
 const UNPAID_ALLOW = new Set([
   'home',
   'login',
   'auth-success',
   'checkout',
   'payment-success',
-  'search'
 ]);
 
 router.beforeEach(async (to) => {
@@ -120,5 +107,3 @@ export default router;
 
 // Optional: helper to bust the cache after payment if needed elsewhere
 export function clearMeCache() { cachedMe = null; }
-
-

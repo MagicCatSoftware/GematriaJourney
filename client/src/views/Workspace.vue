@@ -156,14 +156,6 @@
             {{ publishingAll ? 'Publishing…' : 'Publish All' }}
           </button>
 
-          <!-- New: submit-all to master -->
-          <button
-            class="btn small ghost"
-            :disabled="submittingAll"
-            @click="submitAllToMaster"
-          >
-            {{ submittingAll ? 'Submitting…' : 'Submit All to Master' }}
-          </button>
         </div>
         <span class="muted small" v-if="entriesLoading">Loading…</span>
       </div>
@@ -356,7 +348,6 @@ const visibility = ref('private');
 const savingEntry = ref(false);
 const entryError = ref('');
 const entryOk = ref(false);
-const submittingAll = ref(false);
 
 // live totals/breakdowns for built-ins
 const show = reactive({ simple: false, english: false, hebrew: false });
@@ -613,24 +604,6 @@ function entryTotals(text) {
   return { simple: s, english: en, hebrew: he };
 }
 
-// ---------- BULK SUBMIT TO MASTER ----------
-async function submitAllToMaster() {
-  if (!confirm('Submit ALL of your entries to the Master List for review?')) return;
-  submittingAll.value = true;
-  try {
-    const res = await api.submitAllToMaster(); // new API helper
-    alert(
-      `Submitted ${res?.updated || 0} entries to the Master List` +
-        (res?.skipped ? `, skipped ${res.skipped}` : '') +
-        '.'
-    );
-    await loadEntries(); // refresh statuses
-  } catch (e) {
-    alert(e?.message || 'Failed to submit all entries to Master List');
-  } finally {
-    submittingAll.value = false;
-  }
-}
 
 // ---------- GEMATRIAS ----------
 const gLoading = ref(true);
